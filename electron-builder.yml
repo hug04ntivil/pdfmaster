@@ -1,0 +1,48 @@
+appId: cl.pertec.pdfmaster
+productName: PDF Master
+copyright: Copyright © 2026 Hugo Antivil
+directories:
+  output: release
+  buildResources: assets
+files:
+  - main.js
+  - preload.js
+  - package.json
+  - dist/**
+  - assets/icon.ico
+  - assets/icon.png
+  - "!**/*.map"
+asar: true
+compression: normal
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: assets/icon.ico
+  artifactName: PDF-Master-Setup-${version}.${ext}
+  fileAssociations:
+    - ext: pdf
+      name: Documento PDF
+      description: Documento PDF
+      icon: assets/icon.ico
+      role: Editor
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: PDF Master
+  installerIcon: assets/icon.ico
+  uninstallerIcon: assets/icon.ico
+  installerHeaderIcon: assets/icon.ico
+  language: "3082"
+  deleteAppDataOnUninstall: false
+# Repositorio de actualizaciones: cámbialo por tu usuario/repo de GitHub (también se puede
+# configurar dentro del programa en Ajustes > Actualizaciones).
+publish:
+  - provider: github
+    owner: hug04ntivil
+    repo: pdfmaster
+    releaseType: release

@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      pdf-engines:
+        patterns:
+          - "pdfjs-dist"
+          - "@cantoo/*"
+          - "tesseract.js*"
+          - "@tesseract.js-data/*"
+          - "docx"
+          - "exceljs"
+          - "pptxgenjs"

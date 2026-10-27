@@ -1,0 +1,40 @@
+{
+  "name": "pdf-master",
+  "productName": "PDF Master",
+  "version": "1.0.0",
+  "description": "PDF Master - editor y suite completa de herramientas PDF para Windows",
+  "main": "main.js",
+  "author": "Hugo Antivil <hugo.antivil@pertec.cl>",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "build:renderer": "node scripts/build.mjs",
+    "icons": "node scripts/make-icons.mjs",
+    "start": "npm run build:renderer && electron .",
+    "dev": "electron .",
+    "dist": "npm run build:renderer && electron-builder --win nsis --x64 --publish never",
+    "release": "npm run build:renderer && electron-builder --win nsis --x64 --publish always",
+    "update-engines": "npm update pdfjs-dist @cantoo/pdf-lib @cantoo/fontkit tesseract.js docx pptxgenjs exceljs && npm run build:renderer && npm test",
+    "test": "node scripts/selftest.mjs"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
+  "devDependencies": {
+    "@cantoo/fontkit": "^2.0.12",
+    "@cantoo/pdf-lib": "^2.11.1",
+    "@resvg/resvg-js": "^2.6.2",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "@tesseract.js-data/spa": "^1.0.0",
+    "docx": "^9.14.0",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "exceljs": "^4.4.0",
+    "lucide": "^1.61.0",
+    "pdfjs-dist": "^6.4.299",
+    "png-to-ico": "^3.0.2",
+    "pptxgenjs": "^4.0.1",
+    "tesseract.js": "^7.0.0"
+  }
+}
