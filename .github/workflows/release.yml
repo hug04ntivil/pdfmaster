@@ -20,6 +20,11 @@ jobs:
       - run: npm ci
       - run: node node_modules/electron/install.js
       - run: npm run test
+      - name: Crear el release primero (evita entradas duplicadas al subir los archivos)
+        shell: bash
+        run: gh release view "${{ github.ref_name }}" || gh release create "${{ github.ref_name }}" --title "PDF Master ${{ github.ref_name }}" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Compilar y publicar instalador
         run: npm run release
         env:
