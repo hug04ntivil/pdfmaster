@@ -10,7 +10,9 @@ const UPSTREAM_REPO = 'storytold/pdfcraft'; // proyecto open source usado como r
 const DIST = path.join(__dirname, 'dist');
 const IS_DEV = !app.isPackaged;
 
-if (process.env.PM_E2E) {
+if (process.env.PM_E2E && !app.isPackaged) {
+  // las pruebas usan sus propios datos de usuario: no tocan los ajustes ni la instancia instalada
+  app.setPath('userData', path.join(os.tmpdir(), 'pdfmaster-e2e-userdata'));
   // en las pruebas automáticas la ventana puede quedar tapada: evita que Chromium la "duerma"
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
@@ -82,13 +84,46 @@ const MIME = {
 // ---------------------------------------------------------------- ventana
 let win = null;
 let forceClose = false;
-const pendingPaths = [];
 
-function pdfPathsFromArgv(argv) {
-  return argv
-    .slice(app.isPackaged ? 1 : 2)
-    .filter((a) => !a.startsWith('--') && /\.(pdf|png|jpe?g|webp|bmp|gif)$/i.test(a) && fs.existsSync(a))
-    .map((a) => path.resolve(a));
+// Acciones rápidas del menú contextual de Windows: PDF Master.exe --pm-action=<acción> "archivo"
+const LAUNCH_ACTIONS = new Set(['open', 'merge', 'split', 'compress', 'toword', 'toimages', 'sign', 'protect', 'ocr', 'imgs2pdf', 'office2pdf']);
+let rendererReady = false;
+const launchQueue = []; // lanzamientos recibidos antes de que la interfaz esté lista
+
+function parseLaunch(argv) {
+  // Se revisa toda la línea de comandos: en segundas instancias Electron no mantiene siempre las mismas posiciones.
+  const args = argv.slice(1);
+  const a = args.find((x) => x.startsWith('--pm-action='));
+  const action = a && LAUNCH_ACTIONS.has(a.split('=')[1]) ? a.split('=')[1] : 'open';
+  const paths = args
+    .filter((x) => !x.startsWith('--') && /\.(pdf|png|jpe?g|webp|bmp|gif|docx?|xlsx?|pptx?)$/i.test(x) && fs.existsSync(x))
+    .map((x) => path.resolve(x));
+  return { action, paths };
+}
+
+// Explorer lanza un proceso por cada archivo seleccionado: se agrupan los que llegan casi a la vez (p. ej. "Unir PDFs").
+const collect = { action: null, paths: [], timer: null };
+function collectLaunch({ action, paths }) {
+  if (process.env.PM_E2E) console.log('[launch] recibido', action, paths.map((p) => path.basename(p)).join(','));
+  if (!paths.length) return;
+  if (collect.action && collect.action !== action) flushLaunch();
+  collect.action = action;
+  for (const p of paths) if (!collect.paths.includes(p)) collect.paths.push(p);
+  clearTimeout(collect.timer);
+  collect.timer = setTimeout(flushLaunch, 900);
+}
+function flushLaunch() {
+  clearTimeout(collect.timer);
+  const l = { action: collect.action, paths: collect.paths };
+  collect.action = null;
+  collect.paths = [];
+  if (process.env.PM_E2E) console.log('[launch] entrega', l.action, l.paths.map((p) => path.basename(p)).join(','), 'ready=' + rendererReady);
+  if (!l.action) return;
+  if (rendererReady && win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+    win.webContents.send('app:launch', l);
+  } else launchQueue.push(l);
 }
 
 function createWindow() {
@@ -170,12 +205,11 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', (_e, argv) => {
-    const paths = pdfPathsFromArgv(argv);
     if (win) {
       if (win.isMinimized()) win.restore();
       win.focus();
-      if (paths.length) win.webContents.send('app:open-paths', paths);
     }
+    collectLaunch(parseLaunch(argv));
   });
 
   app.whenReady().then(() => {
@@ -194,7 +228,7 @@ if (!gotLock) {
         return new Response('Not found', { status: 404 });
       }
     });
-    pendingPaths.push(...pdfPathsFromArgv(process.argv));
+    collectLaunch(parseLaunch(process.argv));
     createWindow();
     registerIpc();
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
@@ -265,8 +299,9 @@ function registerIpc() {
   }));
 
   h('app:take-pending', () => {
-    const list = pendingPaths.splice(0);
-    return list;
+    rendererReady = true;
+    if (collect.action) flushLaunch(); // si ya hay archivos agrupándose, se entregan ahora
+    return launchQueue.splice(0);
   });
   h('app:confirm-close', () => { forceClose = true; if (win) win.close(); });
   h('app:set-title-theme', (dark) => {

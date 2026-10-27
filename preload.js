@@ -37,7 +37,7 @@ contextBridge.exposeInMainWorld('pm', {
   installUpdate: inv('update:install'),
   upstreamLatest: inv('upstream:latest'),
   onUpdate: (cb) => on('update:event', cb),
-  onOpenPaths: (cb) => on('app:open-paths', cb),
+  onLaunch: (cb) => on('app:launch', cb),
   onRequestClose: (cb) => on('app:request-close', cb),
   pathForFile: (f) => {
     try { return webUtils.getPathForFile(f); } catch { return ''; }

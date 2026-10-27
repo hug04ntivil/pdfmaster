@@ -38,6 +38,7 @@ nsis:
   uninstallerIcon: assets/icon.ico
   installerHeaderIcon: assets/icon.ico
   language: "3082"
+  include: assets/installer.nsh
   deleteAppDataOnUninstall: false
 # Repositorio de actualizaciones: cámbialo por tu usuario/repo de GitHub (también se puede
 # configurar dentro del programa en Ajustes > Actualizaciones).

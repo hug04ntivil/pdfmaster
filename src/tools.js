@@ -595,7 +595,10 @@ TOOLS.split = async () => {
 TOOLS.merge = async () => {
   const items = [];
   const d = cur();
-  if (d) items.push({ id: uid(), name: `${d.name} (documento abierto)`, live: d, range: '' });
+  const pre = S.pendingMerge; // archivos elegidos desde el menú contextual de Windows
+  S.pendingMerge = null;
+  if (pre) pre.forEach((f) => items.push({ id: uid(), name: f.name, bytes: f.data, range: '' }));
+  else if (d) items.push({ id: uid(), name: `${d.name} (documento abierto)`, live: d, range: '' });
   const list = h('div', { class: 'filelist' });
   const render = () => {
     list.innerHTML = '';
@@ -823,7 +826,8 @@ TOOLS.txt2pdf = async () => {
   });
 };
 TOOLS.office2pdf = async () => {
-  const paths = await window.pm.pickPaths({ kind: 'office', multi: true });
+  const paths = S.pendingOffice || (await window.pm.pickPaths({ kind: 'office', multi: true }));
+  S.pendingOffice = null;
   if (!paths.length) return;
   await withBusy('Convirtiendo con Microsoft Office…', async (b) => {
     for (let i = 0; i < paths.length; i++) {

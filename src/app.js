@@ -50,6 +50,35 @@ async function openPaths(paths) {
   }
   if (images.length) { S.pendingImages = images; runTool('imgs2pdf'); }
 }
+// Acciones rápidas que llegan desde el menú contextual de Windows (clic derecho sobre un archivo)
+const LAUNCH_TOOL = { split: 'split', compress: 'compress', toword: 'toword', toimages: 'toimages', sign: 'sign', protect: 'protect', ocr: 'ocr' };
+async function handleLaunch({ action, paths }) {
+  if (!paths || !paths.length) return;
+  try {
+    if (action === 'merge') {
+      S.pendingMerge = await Promise.all(paths.map((p) => pm.readFile(p)));
+      return await runTool('merge');
+    }
+    if (action === 'imgs2pdf') {
+      S.pendingImages = await Promise.all(paths.map((p) => pm.readFile(p)));
+      return await runTool('imgs2pdf');
+    }
+    if (action === 'office2pdf') {
+      S.pendingOffice = paths;
+      return await runTool('office2pdf');
+    }
+    if (LAUNCH_TOOL[action]) {
+      for (const p of paths) {
+        await openPaths([p]);
+        if (S.cur && S.cur.path && S.cur.path.toLowerCase() === p.toLowerCase()) await runTool(LAUNCH_TOOL[action]);
+      }
+      return;
+    }
+    await openPaths(paths);
+  } catch (e) {
+    toast(`No se pudo ejecutar la acción: ${e.message}`, 'err', 6000);
+  }
+}
 async function saveCurrent(as = false) {
   const d = S.cur;
   if (!d) return;
@@ -156,7 +185,7 @@ function renderWelcome() {
   const withDoc = async (id) => { if (!S.cur) await openFiles(); if (S.cur) runTool(id); };
   const card = (ic, title, sub, fn) => h('button', { class: 'card', onclick: fn }, h('span', { class: 'ci' }, icon(ic, 20)), h('span', null, h('b', null, title), h('small', null, sub)));
   w.append(
-    h('div', { class: 'hero' }, h('img', { src: 'icon.svg', alt: '' }), h('h1', null, 'PDF Master'), h('p', null, 'Todo lo que necesitas para trabajar con archivos PDF, en un solo lugar.'),
+    h('div', { class: 'hero' }, h('img', { src: 'icon.svg', alt: '' }), h('h1', null, 'PDF Master'), h('div', { class: 'by' }, 'by Hugo'), h('p', null, 'Todo lo que necesitas para trabajar con archivos PDF, en un solo lugar.'),
       h('button', { class: 'tb-btn primary big', onclick: openFiles }, icon('folderOpen', 20), 'Abrir un PDF'), h('p', { style: { margin: '10px 0 0', fontSize: '12px' } }, 'o arrastra un archivo hasta aquí')),
     h('div', { class: 'cards' },
       card('merge', 'Unir PDFs', 'Combina varios archivos en uno', () => runTool('merge')),
@@ -415,7 +444,7 @@ async function main() {
   setupKeys();
   OV.setTool('select');
 
-  pm.onOpenPaths((paths) => openPaths(paths));
+  pm.onLaunch((l) => handleLaunch(l));
   pm.onUpdate((ev) => {
     updateState = ev;
     updateListeners.forEach((f) => f());
@@ -434,10 +463,9 @@ async function main() {
   });
 
   await showCurrent();
-  const pending = await pm.takePending();
-  if (pending.length) await openPaths(pending);
+  for (const l of await pm.takePending()) await handleLaunch(l);
   if (S.settings.autoCheckUpdates !== false && S.settings.updateRepo && S.info.packaged) setTimeout(() => pm.checkUpdate(), 5000);
-  window.__pm = { S, viewer, thumbs, OV, E, C, runTool, CATS, openPaths, openEntry, saveCurrent }; // para depuración/pruebas
+  window.__pm = { S, viewer, thumbs, OV, E, C, runTool, CATS, openPaths, openEntry, saveCurrent, handleLaunch }; // para depuración/pruebas
 }
 
 main().catch((e) => {

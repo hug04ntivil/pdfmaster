@@ -140,7 +140,8 @@ svg { flex: none; }
 #welcome { position: absolute; inset: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; padding: 40px 24px; gap: 28px; background: var(--bg); }
 .hero { text-align: center; max-width: 640px; }
 .hero img { width: 84px; height: 84px; border-radius: 22px; box-shadow: var(--shadow); }
-.hero h1 { margin: 14px 0 4px; font-size: 28px; letter-spacing: -0.02em; }
+.hero h1 { margin: 14px 0 0; font-size: 28px; letter-spacing: -0.02em; }
+.hero .by { font-family: "Segoe Script", "Ink Free", "Brush Script MT", cursive; font-size: 15px; color: var(--accent); margin: 0 0 12px; letter-spacing: 0.02em; }
 .hero p { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
 .hero .big { height: 44px; padding: 0 22px; font-size: 15px; border-radius: 10px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; width: min(900px, 100%); }

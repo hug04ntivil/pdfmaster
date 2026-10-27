@@ -1,7 +1,7 @@
 ﻿// Modelo de documento abierto: bytes, pdf.js, historial (deshacer/rehacer), guardado
 import * as pdfjs from 'pdfjs-dist';
 import * as E from './engine.js';
-import { uid, dataUrlToBytes, canvasToBlob, blobToBytes, hexToRgb01, modal, h, field, toast } from './util.js';
+import { uid, dataUrlToBytes, canvasToBlob, blobToBytes, hexToRgb01, modal, h, field, toast, busy } from './util.js';
 
 const base = new URL('.', document.baseURI).href;
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs/pdf.worker.mjs', base).href;
@@ -98,11 +98,14 @@ export class PdfDoc {
       }
     }
     if (password) {
-      let info = null;
-      try { info = (await this.pdf.getMetadata()).info; } catch { /* sin metadatos */ }
-      this.bytes = await E.decrypt(this.bytes, password, info);
-      this.protect = { userPassword: password, ownerPassword: password };
-      await this.openPdf();
+      const b = busy('Descifrando el documento…');
+      try {
+        let info = null;
+        try { info = (await this.pdf.getMetadata()).info; } catch { /* sin metadatos */ }
+        this.bytes = await E.decrypt(this.bytes, password, info);
+        this.protect = { userPassword: password, ownerPassword: password };
+        await this.openPdf();
+      } finally { b.done(); }
       return;
     }
     this.numPages = this.pdf.numPages;

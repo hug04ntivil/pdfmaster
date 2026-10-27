@@ -1,4 +1,4 @@
-﻿# PDF Master
+# PDF Master
 
 Programa de escritorio para Windows para hacer **todo** con archivos PDF: ver, editar, firmar, unir, dividir,
 organizar, eliminar páginas, convertir a otros formatos, comprimir, proteger, OCR y más.
@@ -55,6 +55,15 @@ src/tools.js             panel de herramientas y sus diálogos
 src/convert.js           conversiones y OCR (Tesseract)
 src/app.js               interfaz: pestañas, barra superior, ajustes, atajos
 ```
+
+## Menú contextual de Windows
+
+Al instalar, el clic derecho sobre un archivo añade accesos rápidos (solo para tu usuario, sin administrador):
+
+- **PDF** → submenú **PDF Master**: abrir, unir los PDFs seleccionados, dividir, comprimir, convertir a Word, convertir a imágenes, firmar, proteger con contraseña y OCR.
+- **Imágenes** (JPG, PNG, WebP, BMP, GIF) y **Word/Excel/PowerPoint** → *Convertir a PDF con PDF Master* (si seleccionas varios, se agrupan en un solo trabajo).
+
+En Windows 11 aparece en el menú clásico: clic derecho → **Mostrar más opciones** (o Mayús+F10). Se quita solo al desinstalar.
 
 ## Mantenerlo actualizado
 
