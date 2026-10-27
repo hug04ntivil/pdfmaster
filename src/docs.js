@@ -70,9 +70,12 @@ export class PdfDoc {
 
   async openPdf() {
     await this.destroyPdf();
-    this.task = pdfjs.getDocument({ ...PDF_OPTS, data: this.bytes.slice() });
-    this.pdf = await this.task.promise;
-    this.numPages = this.pdf.numPages;
+    const task = pdfjs.getDocument({ ...PDF_OPTS, data: this.bytes.slice() });
+    this.task = task;
+    const pdf = await task.promise;
+    if (this.task !== task) return; // una apertura más reciente ya reemplazó a esta
+    this.pdf = pdf;
+    this.numPages = pdf.numPages;
     this.version++;
   }
 

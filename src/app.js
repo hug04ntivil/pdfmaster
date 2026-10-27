@@ -135,7 +135,7 @@ function buildToolbar() {
   $('#tg-search').append(h('div', { class: 'search-box' }, icon('search', 15), sIn, h('span', { class: 'hits', id: 'search-hits' }),
     h('span', { class: 'sb' }, btn('b-sprev', 'chevUp', 'Anterior', () => viewer.nextHit(-1)), btn('b-snext', 'chevDown', 'Siguiente', () => viewer.nextHit(1)))));
   $('#tg-app').append(btn('b-thumbs', 'panelLeft', 'Mostrar/ocultar miniaturas', () => { $('#left').classList.toggle('collapsed'); setTimeout(() => viewer.doc && viewer.doc.zoomMode !== 'custom' && viewer.applyZoom(viewer.doc.zoomMode), 200); }),
-    btn('b-theme', 'sun', 'Cambiar tema claro / oscuro', toggleTheme), btn('b-update', 'refresh', 'Actualizaciones', openUpdates), btn('b-settings', 'settings', 'Ajustes', openSettings));
+    btn('b-theme', 'sun', 'Cambiar tema claro / oscuro', toggleTheme), btn('b-settings', 'settings', 'Ajustes y actualizaciones', () => openSettings()));
   $('#btn-newtab').append(icon('plus', 16));
   $('#btn-newtab').onclick = openFiles;
 }
@@ -156,7 +156,7 @@ function refreshToolbar() {
   $('#page-total').textContent = `/ ${has ? d.numPages : 0}`;
   const dark = document.documentElement.dataset.theme === 'dark';
   const tb = $('#b-theme'); tb.innerHTML = ''; tb.append(icon(dark ? 'sun' : 'moon', 18));
-  $('#b-update').classList.toggle('update-dot', updateState.state === 'available' || updateState.state === 'downloaded');
+  $('#b-settings').classList.toggle('update-dot', updateState.state === 'available' || updateState.state === 'downloaded');
   document.querySelectorAll('.thumb-act').forEach((b) => { b.disabled = !has; });
   pm.setTitle(has ? `${d.name}${d.dirty ? ' •' : ''} — PDF Master` : 'PDF Master');
   const st = $('#st-doc');
@@ -262,33 +262,8 @@ function buildThumbActions() {
   $('#thumb-actions').append(mk('rotateCcw', 'Rotar a la izquierda', 'rotateL'), mk('rotateCw', 'Rotar a la derecha', 'rotateR'), mk('trash', 'Eliminar páginas', 'delete'), mk('grid', 'Organizar páginas', 'organize'));
 }
 
-// ---------------------------------------------------------------- ajustes y actualizaciones
-async function openSettings() {
-  const f = {
-    theme: field({ type: 'select', label: 'Tema', options: [['system', 'Seguir el de Windows'], ['light', 'Claro'], ['dark', 'Oscuro']], value: S.settings.theme }),
-    zoom: field({ type: 'select', label: 'Zoom al abrir un documento', options: [['fit-width', 'Ajustar al ancho'], ['fit-page', 'Página completa'], ['100', '100%'], ['125', '125%']], value: S.settings.defaultZoom || 'fit-width' }),
-    author: field({ type: 'text', label: 'Tu nombre (para firmas y metadatos)', value: S.settings.author || '' }),
-    ocr: field({ type: 'select', label: 'Idioma predeterminado del OCR', options: [['spa+eng', 'Español + inglés'], ['spa', 'Español'], ['eng', 'Inglés']], value: S.settings.ocrLang || 'spa+eng' }),
-    repo: field({ type: 'text', label: 'Repositorio de actualizaciones (GitHub)', placeholder: 'hug04ntivil/pdfmaster', value: S.settings.updateRepo || '', hint: 'Donde publicas las nuevas versiones de PDF Master (Releases). Déjalo vacío si aún no lo usas.' }),
-    auto: field({ type: 'check', label: 'Buscar actualizaciones automáticamente al abrir el programa', value: S.settings.autoCheckUpdates !== false }),
-  };
-  const defApps = h('button', { class: 'btn', onclick: () => pm.openExternal('ms-settings:defaultapps') }, icon('external', 15), 'Elegir PDF Master como lector de PDF predeterminado');
-  const ok = await modal({
-    title: 'Ajustes', icon: 'settings', body: h('div', null, f.theme.el, f.zoom.el, f.author.el, f.ocr.el, f.repo.el, f.auto.el, h('div', { class: 'field' }, defApps),
-      h('div', { class: 'hint', style: { color: 'var(--muted)', fontSize: '12px' } }, `PDF Master ${S.info.version} · Electron ${S.info.electron} · ${S.info.platform}`)),
-    okText: 'Guardar', onOk: () => {
-      const r = f.repo.get().trim();
-      if (r && !/^[\w.-]+\/[\w.-]+$/.test(r)) throw new Error('El repositorio debe tener el formato usuario/repositorio');
-      if (r.toLowerCase() === (S.info.upstream || '').toLowerCase()) throw new Error(`«${r}» es el proyecto de referencia, no tu repositorio. Usa el tuyo: hug04ntivil/pdfmaster.`);
-      return true;
-    },
-  });
-  if (!ok) return;
-  S.settings = await pm.setSettings({ theme: f.theme.get(), defaultZoom: f.zoom.get(), author: f.author.get(), ocrLang: f.ocr.get(), updateRepo: f.repo.get().trim(), autoCheckUpdates: f.auto.get() });
-  applyTheme();
-  refreshAll();
-  toast('Ajustes guardados', 'ok');
-}
+// ---------------------------------------------------------------- ajustes (General · Actualizaciones · Acerca de)
+const LEGEND = 'PDF Master es un proyecto de código abierto para uso personal, personalizado por Hugo A.';
 
 function updateText() {
   const u = updateState;
@@ -303,15 +278,48 @@ function updateText() {
     default: return 'Pulsa «Buscar actualizaciones» para comprobar si hay una versión nueva.';
   }
 }
-async function openUpdates() {
-  const status1 = h('div', { style: { fontWeight: 600, margin: '4px 0 10px', wordBreak: 'break-word' } });
+
+function legendCard() {
+  return h('div', { class: 'legend' },
+    h('div', { class: 'legend-t' }, icon('sparkles', 15), 'Código abierto · uso personal'),
+    h('p', null, LEGEND),
+    h('small', null, 'Construido sobre software libre: pdf.js, pdf-lib, Tesseract y Electron. Inspirado en pdfcraft (Apache-2.0 / MIT).'));
+}
+
+async function openSettings(startTab = 'general') {
+  const f = {
+    theme: field({ type: 'select', label: 'Tema', options: [['system', 'Seguir el de Windows'], ['light', 'Claro'], ['dark', 'Oscuro']], value: S.settings.theme }),
+    zoom: field({ type: 'select', label: 'Zoom al abrir un documento', options: [['fit-width', 'Ajustar al ancho'], ['fit-page', 'Página completa'], ['100', '100%'], ['125', '125%']], value: S.settings.defaultZoom || 'fit-width' }),
+    author: field({ type: 'text', label: 'Tu nombre (para firmas y metadatos)', value: S.settings.author || '' }),
+    ocr: field({ type: 'select', label: 'Idioma predeterminado del OCR', options: [['spa+eng', 'Español + inglés'], ['spa', 'Español'], ['eng', 'Inglés']], value: S.settings.ocrLang || 'spa+eng' }),
+    repo: field({ type: 'text', label: 'Repositorio de actualizaciones (GitHub)', placeholder: 'hug04ntivil/pdfmaster', value: S.settings.updateRepo || '', hint: 'Donde publicas las nuevas versiones de PDF Master (Releases).' }),
+    auto: field({ type: 'check', label: 'Buscar actualizaciones automáticamente al abrir el programa', value: S.settings.autoCheckUpdates !== false }),
+  };
+  const checkRepo = () => {
+    const r = f.repo.get().trim();
+    if (r && !/^[\w.-]+\/[\w.-]+$/.test(r)) throw new Error('El repositorio debe tener el formato usuario/repositorio');
+    if (r.toLowerCase() === (S.info.upstream || '').toLowerCase()) throw new Error(`«${r}» es el proyecto de referencia, no tu repositorio. Usa el tuyo: hug04ntivil/pdfmaster.`);
+    return r;
+  };
+  const defApps = h('button', { class: 'btn', onclick: () => pm.openExternal('ms-settings:defaultapps') }, icon('external', 15), 'Elegir PDF Master como lector de PDF predeterminado');
+
+  // --- pestaña Actualizaciones
+  const status1 = h('div', { class: 'upd-status' });
   const actions = h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } });
-  const upstream = h('div', { class: 'props-card' }, h('h4', null, 'Proyecto de referencia (pdfcraft)'), h('div', { id: 'upstream-info' }, 'Consultando…'));
+  const upstream = h('div', { class: 'props-card', style: { marginTop: '12px' } }, h('h4', null, 'Proyecto de referencia (pdfcraft)'), h('div', { id: 'upstream-info' }, 'Consultando…'));
   const paint = () => {
     status1.textContent = updateText();
     actions.innerHTML = '';
     const u = updateState;
-    actions.append(h('button', { class: 'btn', onclick: () => pm.checkUpdate().then((r) => { if (r.state !== 'started') { updateState = r; paint(); } }) }, icon('refresh', 15), 'Buscar actualizaciones'));
+    actions.append(h('button', { class: 'btn', disabled: u.state === 'checking' || u.state === 'downloading', onclick: async () => {
+      try {
+        const repo = checkRepo();
+        S.settings = await pm.setSettings({ updateRepo: repo, autoCheckUpdates: f.auto.get() });
+      } catch (e) { return toast(e.message, 'err', 6000); }
+      updateState = { state: 'checking' }; paint();
+      const r = await pm.checkUpdate();
+      if (r.state !== 'started') { updateState = r; paint(); }
+    } }, icon('refresh', 15), 'Buscar actualizaciones'));
     if (u.state === 'available') actions.append(h('button', { class: 'btn primary', onclick: () => pm.downloadUpdate() }, icon('download', 15), 'Descargar'));
     if (u.state === 'downloaded') actions.append(h('button', { class: 'btn primary', onclick: () => pm.installUpdate() }, icon('rocket', 15), 'Reiniciar e instalar'));
   };
@@ -322,16 +330,44 @@ async function openUpdates() {
     if (!box) return;
     box.innerHTML = '';
     if (r.error) { box.textContent = `No se pudo consultar (${r.error}).`; return; }
-    box.append(h('div', null, `Última versión publicada: `, h('span', { class: 'badge' }, r.tag), ` (${new Date(r.date).toLocaleDateString('es-CL')})`),
+    box.append(h('div', null, 'Última versión publicada: ', h('span', { class: 'badge' }, r.tag), ` (${new Date(r.date).toLocaleDateString('es-CL')})`),
       h('div', { class: 'notes', style: { marginTop: '8px' } }, r.notes || 'Sin notas.'),
       h('button', { class: 'btn', style: { marginTop: '8px' }, onclick: () => pm.openExternal(r.url) }, icon('external', 15), 'Ver novedades en GitHub'));
   });
-  await modal({
-    title: 'Actualizaciones', icon: 'refresh', hideCancel: true, okText: 'Cerrar',
-    body: h('div', null, h('div', { style: { color: 'var(--muted)' } }, `Versión instalada: ${S.info.version}`), status1, actions,
-      h('div', { class: 'hint', style: { color: 'var(--muted)', fontSize: '12px', margin: '10px 0' } }, S.settings.updateRepo ? `Repositorio de actualizaciones: ${S.settings.updateRepo}` : 'Aún no has configurado tu repositorio de actualizaciones (Ajustes).'), upstream),
+
+  const panes = {
+    general: h('div', null, f.theme.el, f.zoom.el, f.author.el, f.ocr.el, h('div', { class: 'field' }, defApps)),
+    updates: h('div', null,
+      h('div', { style: { color: 'var(--muted)' } }, `Versión instalada: ${S.info.version}`), status1, actions,
+      h('div', { style: { marginTop: '12px' } }, f.repo.el, f.auto.el), upstream, legendCard()),
+    about: h('div', { class: 'about' },
+      h('img', { src: 'icon.svg', alt: '', width: 72, height: 72 }),
+      h('div', { class: 'about-name' }, 'PDF Master'),
+      h('div', { class: 'by' }, 'by Hugo'),
+      h('div', { class: 'about-ver' }, `Versión ${S.info.version}`),
+      legendCard(),
+      h('div', { class: 'about-meta' }, `Electron ${S.info.electron} · ${S.info.platform}`),
+      h('div', { class: 'about-meta' }, '© 2026 Hugo A.')),
+  };
+  const tabs = h('div', { class: 'seg-tabs' });
+  const names = { general: 'General', updates: 'Actualizaciones', about: 'Acerca de' };
+  const show = (t) => {
+    tabs.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.t === t));
+    Object.entries(panes).forEach(([k, el]) => { el.hidden = k !== t; });
+  };
+  Object.keys(names).forEach((k) => tabs.append(h('button', { 'data-t': k, onclick: () => show(k) }, names[k])));
+  show(startTab);
+
+  const ok = await modal({
+    title: 'Ajustes', icon: 'settings', size: 'wide', body: h('div', { style: { minHeight: '420px' } }, tabs, ...Object.values(panes)),
+    okText: 'Guardar', onOk: () => { checkRepo(); return true; },
   });
   updateListeners.delete(paint);
+  if (!ok) return;
+  S.settings = await pm.setSettings({ theme: f.theme.get(), defaultZoom: f.zoom.get(), author: f.author.get(), ocrLang: f.ocr.get(), updateRepo: f.repo.get().trim(), autoCheckUpdates: f.auto.get() });
+  applyTheme();
+  refreshAll();
+  toast('Ajustes guardados', 'ok');
 }
 
 // ---------------------------------------------------------------- arrastrar y soltar
@@ -448,7 +484,7 @@ async function main() {
   pm.onUpdate((ev) => {
     updateState = ev;
     updateListeners.forEach((f) => f());
-    if (ev.state === 'available') toast(`Nueva versión disponible: ${ev.version}`, 'ok', 9000, { label: 'Ver', fn: openUpdates });
+    if (ev.state === 'available') toast(`Nueva versión disponible: ${ev.version}`, 'ok', 9000, { label: 'Ver', fn: () => openSettings('updates') });
     refreshToolbar();
   });
   pm.onRequestClose(async () => {

@@ -257,6 +257,18 @@ svg { flex: none; }
 .gp.dragover-before { box-shadow: -4px 0 0 0 var(--accent); }
 .gp.dragover-after { box-shadow: 4px 0 0 0 var(--accent); }
 .gp.dragging { opacity: 0.35; }
+.upd-status { font-weight: 600; margin: 4px 0 10px; word-break: break-word; }
+.legend { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; background: var(--panel-2); }
+.legend-t { display: flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+.legend p { margin: 6px 0 4px; font-size: 13.5px; }
+.legend small { color: var(--muted); }
+.about { display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 6px; }
+.about img { border-radius: 18px; box-shadow: var(--shadow); }
+.about-name { margin-top: 10px; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.about .by { font-family: "Segoe Script", "Ink Free", "Brush Script MT", cursive; font-size: 14px; color: var(--accent); }
+.about-ver { color: var(--muted); margin-top: 4px; }
+.about .legend { text-align: left; width: 100%; }
+.about-meta { color: var(--muted); font-size: 12px; margin-top: 8px; }
 .kv { display: grid; grid-template-columns: 150px 1fr; gap: 4px 12px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; word-break: break-all; }

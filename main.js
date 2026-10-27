@@ -294,7 +294,7 @@ function registerIpc() {
     documents: app.getPath('documents'),
     upstream: UPSTREAM_REPO,
     electron: process.versions.electron,
-    platform: `${os.type()} ${os.release()}`,
+    platform: process.platform === 'win32' ? `${parseInt(os.release().split('.')[2], 10) >= 22000 ? 'Windows 11' : 'Windows 10'} (compilación ${os.release().split('.')[2]})` : `${os.type()} ${os.release()}`,
     darkSystem: nativeTheme.shouldUseDarkColors,
   }));
 

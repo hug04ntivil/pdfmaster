@@ -241,6 +241,8 @@ module.exports = async ({ run, shot, sleep, win }) => {
 
   // =============================== anotaciones interactivas
   await run(`(()=>{ const d=window.__pm.S.cur; d.dirty=false; return 1; })()`);
+  for (let i = 0; i < 40; i++) { if (await run(`!!document.querySelector('.ov-layer') && [...document.querySelectorAll('.pcanvas')].some(c=>c.width>0)`)) break; await sleep(250); }
+  await sleep(500);
   await run(`window.__pm.OV.setTool('text')`);
   await sleep(300);
   // clic real sobre la página 1 con evento de puntero
@@ -309,12 +311,18 @@ module.exports = async ({ run, shot, sleep, win }) => {
   // ajustes y actualizaciones
   await run(`document.querySelector('#b-settings').click()`); await waitModal('Ajustes'); await sleep(300);
   await shot(path.join(OUT, 'ajustes.png'));
-  await run(`document.querySelector('.modal .btn:not(.primary)').click()`); await sleep(300);
-  await run(`document.querySelector('#b-update').click()`); await waitModal('Actualizaciones'); await sleep(2500);
+  await run(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`); await sleep(400);
+  check('el botón de actualizaciones ya no está en la barra superior', (await run(`!document.querySelector('#b-update')`)) === true);
+  await run(`document.querySelector('#b-settings').click()`); await waitModal('Ajustes');
+  await run(`[...document.querySelectorAll('.modal .seg-tabs button')].find(b=>b.dataset.t==='updates').click()`); await sleep(2500);
   await shot(path.join(OUT, 'actualizaciones.png'));
+  check('Ajustes > Actualizaciones tiene el botón Buscar', (await run(`[...document.querySelectorAll('.modal .btn')].some(b=>b.textContent.includes('Buscar actualizaciones'))`)) === true);
   const up = await run(`document.querySelector('#upstream-info')?.textContent || ''`);
   check('panel de actualizaciones consulta pdfcraft', /v\d+\.\d+/.test(up), up.slice(0, 80));
-  await run(`document.querySelector('.modal .btn.primary').click()`);
+  check('leyenda de código abierto visible', (await run(`document.querySelector('.modal .legend p')?.textContent || ''`)).includes('personalizado por Hugo A.'));
+  await run(`[...document.querySelectorAll('.modal .seg-tabs button')].find(b=>b.dataset.t==='about').click()`); await sleep(300);
+  await shot(path.join(OUT, 'acerca.png'));
+  await run(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
 
   await sleep(300);
   const fails = results.filter((x) => !x[1]);
