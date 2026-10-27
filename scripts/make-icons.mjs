@@ -9,7 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const svg = fs.readFileSync(path.join(root, 'assets', 'icon.svg'));
 const render = (size) => new Resvg(svg, { fitTo: { mode: 'width', value: size } }).render().asPng();
 
-fs.writeFileSync(path.join(root, 'assets', 'icon.png'), render(512));
+fs.writeFileSync(path.join(root, 'assets', 'icon.png'), render(1024)); // 1024 px: macOS genera de aquí el .icns
 const sizes = [16, 24, 32, 48, 64, 128, 256];
 const ico = await pngToIco(sizes.map(render));
 fs.writeFileSync(path.join(root, 'assets', 'icon.ico'), ico);

@@ -8,9 +8,11 @@ import { PDFDocument, StandardFonts, degrees, rgb } from '@cantoo/pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const fontDir = path.join(process.env.WINDIR || 'C:\\Windows', 'Fonts');
+// Arial del sistema según la plataforma (Windows o macOS)
+const fontDir = process.platform === 'darwin' ? '/System/Library/Fonts/Supplemental' : path.join(process.env.WINDIR || 'C:\\Windows', 'Fonts');
+const arialFiles = process.platform === 'darwin' ? ['Arial.ttf', 'Arial Bold.ttf', 'Arial Italic.ttf', 'Arial Bold Italic.ttf'] : ['arial.ttf', 'arialbd.ttf', 'ariali.ttf', 'arialbi.ttf'];
 const ctx = {
-  systemFonts: { Arial: ['arial.ttf', 'arialbd.ttf', 'ariali.ttf', 'arialbi.ttf'] },
+  systemFonts: { Arial: arialFiles },
   loadFont: async (f) => new Uint8Array(fs.readFileSync(path.join(fontDir, f))),
 };
 let failed = 0;

@@ -5,7 +5,7 @@ const os = require('node:os');
 const { spawn } = require('node:child_process');
 
 module.exports = async ({ run, sleep, win, shot }) => {
-  const OUT = path.join(os.tmpdir(), 'pdfmaster-e2e', 'launch');
+  const OUT = path.join(process.env.PM_E2E_DIR || path.join(os.tmpdir(), 'pdfmaster-e2e'), 'launch');
   fs.rmSync(OUT, { recursive: true, force: true });
   fs.mkdirSync(OUT, { recursive: true });
   const { PDFDocument, StandardFonts } = require('@cantoo/pdf-lib');
@@ -17,7 +17,7 @@ module.exports = async ({ run, sleep, win, shot }) => {
   const A = await mk('Uno', 2), B = await mk('Dos', 3);
   const I1 = png('a.png', '#2563eb'), I2 = png('b.png', '#16a34a');
 
-  const exe = path.join(__dirname, '..', '..', 'node_modules', 'electron', 'dist', 'electron.exe');
+  const exe = require(path.join(__dirname, '..', '..', 'node_modules', 'electron')); // ruta del ejecutable en cualquier sistema
   const root = path.join(__dirname, '..', '..');
   // Explorer lanza un proceso por archivo; aquí se hace igual
   const explorer = async (action, files) => {

@@ -6,7 +6,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const exe = path.join(root, 'release', 'win-unpacked', 'PDF Master.exe');
+// Aplicación empaquetada según la plataforma (Windows: win-unpacked; macOS: mac-universal o mac-arm64/mac)
+const exe = process.platform === 'darwin'
+  ? ['mac-universal', 'mac-arm64', 'mac'].map((d) => path.join(root, 'release', d, 'PDF Master.app', 'Contents', 'MacOS', 'PDF Master')).find((p) => fs.existsSync(p))
+  : path.join(root, 'release', 'win-unpacked', 'PDF Master.exe');
+if (!exe) throw new Error('No se encontró la aplicación empaquetada en release/');
 const pdf = process.argv[2];
 const port = 9333;
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-packaged-'));
@@ -30,7 +34,10 @@ const ok = (n, c, x = '') => { out.push(c); console.log((c ? '  OK   ' : '  FAIL
 await sleep(1500);
 ok('título de la ventana', (await ev('document.title')) === 'PDF Master');
 ok('pantalla de bienvenida con herramientas', (await ev(`document.querySelectorAll('.card').length`)) >= 6 && (await ev(`document.querySelectorAll('#tools .tool').length`)) > 40, (await ev(`document.querySelectorAll('#tools .tool').length`)) + ' herramientas');
-ok('versión', (await ev('window.pm.info().then(i=>i.version)')) === '1.0.0' && (await ev('window.pm.info().then(i=>i.packaged)')) === true);
+const expected = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+ok('versión y empaquetado', (await ev('window.pm.info().then(i=>i.version)')) === expected && (await ev('window.pm.info().then(i=>i.packaged)')) === true, `${expected} en ${process.platform}`);
+ok('plataforma de la interfaz', (await ev('document.body.classList.contains("mac") || document.body.classList.contains("win")')) === true);
+ok('fuentes del sistema', (await ev('window.pm.listFonts().then(f=>Object.keys(f).includes("Arial"))')) === true);
 if (pdf) {
   await ev(`window.__pm ? 1 : 0`);
   // abre el PDF a través de la API expuesta de la app (la ruta se envía al proceso principal)

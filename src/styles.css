@@ -48,6 +48,8 @@ svg { flex: none; }
   height: 44px; display: flex; align-items: flex-end; gap: 4px; padding-left: 12px; padding-right: 150px;
   background: var(--panel); border-bottom: 1px solid var(--line); -webkit-app-region: drag; user-select: none;
 }
+/* macOS: el semáforo de la ventana ocupa la izquierda y no hay botones de Windows a la derecha */
+body.mac #titlebar { padding-left: 84px; padding-right: 14px; }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; height: 44px; padding-right: 10px; }
 .brand img { border-radius: 6px; }
 #tabs { display: flex; align-items: flex-end; gap: 2px; min-width: 0; height: 36px; overflow: hidden; -webkit-app-region: no-drag; }

@@ -1,12 +1,13 @@
 appId: cl.pertec.pdfmaster
 productName: PDF Master
-copyright: Copyright © 2026 Hugo Antivil
+copyright: Copyright © 2026 Hugo A.
 directories:
   output: release
   buildResources: assets
 files:
   - main.js
   - preload.js
+  - mac-services.js
   - package.json
   - dist/**
   - assets/icon.ico
@@ -14,6 +15,12 @@ files:
   - "!**/*.map"
 asar: true
 compression: normal
+# Asociación de archivos (Windows: "Abrir con"; macOS: documento PDF en Finder)
+fileAssociations:
+  - ext: pdf
+    name: Documento PDF
+    description: Documento PDF
+    role: Editor
 win:
   target:
     - target: nsis
@@ -21,12 +28,6 @@ win:
         - x64
   icon: assets/icon.ico
   artifactName: PDF-Master-Setup-${version}.${ext}
-  fileAssociations:
-    - ext: pdf
-      name: Documento PDF
-      description: Documento PDF
-      icon: assets/icon.ico
-      role: Editor
 nsis:
   oneClick: false
   perMachine: false
@@ -40,8 +41,37 @@ nsis:
   language: "3082"
   include: assets/installer.nsh
   deleteAppDataOnUninstall: false
-# Repositorio de actualizaciones: cámbialo por tu usuario/repo de GitHub (también se puede
-# configurar dentro del programa en Ajustes > Actualizaciones).
+mac:
+  category: public.app-category.productivity
+  icon: assets/icon.png
+  target:
+    - target: dmg
+      arch:
+        - universal
+  artifactName: PDF-Master-${version}-mac.${ext}
+  # Sin certificado de Apple Developer: firma "ad hoc" (la app abre tras aprobarla una vez en Ajustes del Sistema)
+  identity: "-"
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  extendInfo:
+    LSMinimumSystemVersion: "11.0"
+    NSDocumentsFolderUsageDescription: PDF Master necesita acceder a tus documentos para abrir y guardar PDF.
+    NSDesktopFolderUsageDescription: PDF Master necesita acceder al escritorio para abrir y guardar PDF.
+    NSDownloadsFolderUsageDescription: PDF Master necesita acceder a Descargas para abrir y guardar PDF.
+    NSAppleEventsUsageDescription: PDF Master usa Microsoft Office para convertir documentos de Office a PDF.
+dmg:
+  title: PDF Master ${version}
+  window:
+    width: 540
+    height: 380
+  contents:
+    - x: 140
+      y: 190
+    - x: 400
+      y: 190
+      type: link
+      path: /Applications
+# Repositorio de actualizaciones (también configurable dentro del programa en Ajustes > Actualizaciones).
 publish:
   - provider: github
     owner: hug04ntivil

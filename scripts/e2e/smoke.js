@@ -4,7 +4,7 @@ const path = require('node:path');
 const os = require('node:os');
 
 module.exports = async ({ run, shot, sleep, win }) => {
-  const out = path.join(os.tmpdir(), 'pdfmaster-e2e');
+  const out = path.join(process.env.PM_E2E_DIR || path.join(os.tmpdir(), 'pdfmaster-e2e'));
   fs.mkdirSync(out, { recursive: true });
   const { PDFDocument, StandardFonts, rgb } = require('@cantoo/pdf-lib');
   const doc = await PDFDocument.create();

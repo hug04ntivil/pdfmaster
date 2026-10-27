@@ -269,7 +269,7 @@ function updateText() {
   const u = updateState;
   switch (u.state) {
     case 'checking': return 'Buscando actualizaciones…';
-    case 'available': return `Hay una nueva versión: ${u.version}`;
+    case 'available': return u.manual ? `Hay una nueva versión: ${u.version}. Descarga el nuevo instalador (.dmg) y arrástralo a Aplicaciones para reemplazar la actual.` : `Hay una nueva versión: ${u.version}`;
     case 'none': return 'Tienes la última versión.';
     case 'downloading': return `Descargando… ${u.percent || 0}%`;
     case 'downloaded': return `La versión ${u.version} está lista para instalar.`;
@@ -288,7 +288,7 @@ function legendCard() {
 
 async function openSettings(startTab = 'general') {
   const f = {
-    theme: field({ type: 'select', label: 'Tema', options: [['system', 'Seguir el de Windows'], ['light', 'Claro'], ['dark', 'Oscuro']], value: S.settings.theme }),
+    theme: field({ type: 'select', label: 'Tema', options: [['system', pm.platform === 'darwin' ? 'Seguir el de macOS' : 'Seguir el de Windows'], ['light', 'Claro'], ['dark', 'Oscuro']], value: S.settings.theme }),
     zoom: field({ type: 'select', label: 'Zoom al abrir un documento', options: [['fit-width', 'Ajustar al ancho'], ['fit-page', 'Página completa'], ['100', '100%'], ['125', '125%']], value: S.settings.defaultZoom || 'fit-width' }),
     author: field({ type: 'text', label: 'Tu nombre (para firmas y metadatos)', value: S.settings.author || '' }),
     ocr: field({ type: 'select', label: 'Idioma predeterminado del OCR', options: [['spa+eng', 'Español + inglés'], ['spa', 'Español'], ['eng', 'Inglés']], value: S.settings.ocrLang || 'spa+eng' }),
@@ -301,7 +301,13 @@ async function openSettings(startTab = 'general') {
     if (r.toLowerCase() === (S.info.upstream || '').toLowerCase()) throw new Error(`«${r}» es el proyecto de referencia, no tu repositorio. Usa el tuyo: hug04ntivil/pdfmaster.`);
     return r;
   };
-  const defApps = h('button', { class: 'btn', onclick: () => pm.openExternal('ms-settings:defaultapps') }, icon('external', 15), 'Elegir PDF Master como lector de PDF predeterminado');
+  const isMac = pm.platform === 'darwin';
+  // Windows: botón a "Aplicaciones predeterminadas"; macOS: instrucciones de Finder y acciones rápidas del clic derecho
+  const defApps = isMac
+    ? h('div', { class: 'hint', style: { color: 'var(--muted)', fontSize: '12.5px' } }, 'Para abrir todos los PDF con PDF Master: clic derecho sobre un PDF → Obtener información → Abrir con → PDF Master → Cambiar todo…')
+    : h('button', { class: 'btn', onclick: () => pm.openExternal('ms-settings:defaultapps') }, icon('external', 15), 'Elegir PDF Master como lector de PDF predeterminado');
+  const qa = field({ type: 'check', label: 'Accesos rápidos en Finder (clic derecho → Acciones rápidas → PDF Master…)', value: true });
+  if (isMac) pm.qaStatus().then((s) => { qa.set(s.installed || S.settings.quickActions !== false); });
 
   // --- pestaña Actualizaciones
   const status1 = h('div', { class: 'upd-status' });
@@ -320,7 +326,7 @@ async function openSettings(startTab = 'general') {
       const r = await pm.checkUpdate();
       if (r.state !== 'started') { updateState = r; paint(); }
     } }, icon('refresh', 15), 'Buscar actualizaciones'));
-    if (u.state === 'available') actions.append(h('button', { class: 'btn primary', onclick: () => pm.downloadUpdate() }, icon('download', 15), 'Descargar'));
+    if (u.state === 'available') actions.append(h('button', { class: 'btn primary', onclick: () => (u.manual ? pm.openExternal(u.url) : pm.downloadUpdate()) }, icon('download', 15), u.manual ? 'Descargar el instalador' : 'Descargar'));
     if (u.state === 'downloaded') actions.append(h('button', { class: 'btn primary', onclick: () => pm.installUpdate() }, icon('rocket', 15), 'Reiniciar e instalar'));
   };
   updateListeners.add(paint);
@@ -336,7 +342,7 @@ async function openSettings(startTab = 'general') {
   });
 
   const panes = {
-    general: h('div', null, f.theme.el, f.zoom.el, f.author.el, f.ocr.el, h('div', { class: 'field' }, defApps)),
+    general: h('div', null, f.theme.el, f.zoom.el, f.author.el, f.ocr.el, isMac ? qa.el : null, h('div', { class: 'field' }, defApps)),
     updates: h('div', null,
       h('div', { style: { color: 'var(--muted)' } }, `Versión instalada: ${S.info.version}`), status1, actions,
       h('div', { style: { marginTop: '12px' } }, f.repo.el, f.auto.el), upstream, legendCard()),
@@ -365,6 +371,7 @@ async function openSettings(startTab = 'general') {
   updateListeners.delete(paint);
   if (!ok) return;
   S.settings = await pm.setSettings({ theme: f.theme.get(), defaultZoom: f.zoom.get(), author: f.author.get(), ocrLang: f.ocr.get(), updateRepo: f.repo.get().trim(), autoCheckUpdates: f.auto.get() });
+  if (isMac) { const s = await pm.qaSet(qa.get()); if (qa.get() && s.installed) toast('Accesos rápidos de Finder instalados. Si no aparecen enseguida, cierra y abre sesión.', 'ok', 6000); }
   applyTheme();
   refreshAll();
   toast('Ajustes guardados', 'ok');
@@ -428,7 +435,16 @@ function setupKeys() {
 }
 
 // ---------------------------------------------------------------- inicio
+// En macOS los atajos se muestran con ⌘ / ⇧ en lugar de Ctrl / Mayús
+function macizeTitles(root = document) {
+  if (pm.platform !== 'darwin') return;
+  root.querySelectorAll('[title]').forEach((el) => {
+    el.title = el.title.replace(/Ctrl\+Mayús\+/g, '⇧⌘').replace(/Ctrl\+/g, '⌘').replace(/Ctrl \+\/-\/0/g, '⌘ +/-/0').replace(/Ctrl\+-/g, '⌘-').replace(/Ctrl\++/g, '⌘+');
+  });
+}
+
 async function main() {
+  document.body.classList.add(pm.platform === 'darwin' ? 'mac' : 'win');
   S.info = await pm.info();
   S.settings = await pm.getSettings();
   try { S.sysFonts = await pm.listFonts(); } catch { S.sysFonts = {}; }
@@ -473,6 +489,7 @@ async function main() {
   setApp({ viewer, thumbs });
 
   buildToolbar();
+  macizeTitles();
   buildThumbActions();
   initToolSearch();
   renderTools();
@@ -481,6 +498,21 @@ async function main() {
   OV.setTool('select');
 
   pm.onLaunch((l) => handleLaunch(l));
+  // Comandos del menú de macOS (⌘O, ⌘S, ⌘Z…)
+  pm.onCommand((cmd) => {
+    const editing = document.activeElement && (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable);
+    switch (cmd) {
+      case 'open': openFiles(); break;
+      case 'save': saveCurrent(false); break;
+      case 'saveas': saveCurrent(true); break;
+      case 'print': doPrint(); break;
+      case 'closetab': if (S.cur) closeTab(S.cur); break;
+      case 'undo': if (editing) document.execCommand('undo'); else doUndo(); break;
+      case 'redo': if (editing) document.execCommand('redo'); else doRedo(); break;
+      case 'find': { const s = $('#search-input'); if (s && !s.disabled) { s.focus(); s.select(); } break; }
+      default: break;
+    }
+  });
   pm.onUpdate((ev) => {
     updateState = ev;
     updateListeners.forEach((f) => f());

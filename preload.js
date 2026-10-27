@@ -9,6 +9,10 @@ const on = (ch, cb) => {
 };
 
 contextBridge.exposeInMainWorld('pm', {
+  platform: process.platform, // 'win32' | 'darwin'
+  onCommand: (cb) => on('app:command', cb),
+  qaStatus: inv('qa:status'),
+  qaSet: inv('qa:set'),
   info: inv('app:info'),
   takePending: inv('app:take-pending'),
   confirmClose: inv('app:confirm-close'),

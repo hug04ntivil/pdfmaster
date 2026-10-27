@@ -9,7 +9,19 @@ permissions:
   contents: write
 
 jobs:
+  # El release se crea una sola vez; los instaladores de Windows y de Mac se suben después (evita entradas duplicadas)
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Crear el release
+        run: gh release view "$TAG" --repo "$REPO" || gh release create "$TAG" --repo "$REPO" --title "PDF Master $TAG" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+
   windows:
+    needs: release
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,12 +32,25 @@ jobs:
       - run: npm ci
       - run: node node_modules/electron/install.js
       - run: npm run test
-      - name: Crear el release primero (evita entradas duplicadas al subir los archivos)
-        shell: bash
-        run: gh release view "${{ github.ref_name }}" || gh release create "${{ github.ref_name }}" --title "PDF Master ${{ github.ref_name }}" --generate-notes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Compilar y publicar instalador
+      - name: Compilar y publicar el instalador de Windows
         run: npm run release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  macos:
+    needs: release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node node_modules/electron/install.js
+      - run: npm run test
+      - name: Compilar y publicar el instalador de Mac (.dmg universal)
+        run: npm run release:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"

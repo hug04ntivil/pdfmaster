@@ -278,7 +278,7 @@ TOOLS.sign = async () => {
   };
   setupPad();
   const typed = field({ type: 'text', label: 'Escribe tu nombre', value: S.settings.author || '' });
-  const fontOpts = ['Segoe Script', 'Ink Free', 'Times New Roman', 'Georgia', 'Arial'].filter((f) => S.sysFonts[f]);
+  const fontOpts = ['Segoe Script', 'Ink Free', 'Brush Script MT', 'Times New Roman', 'Georgia', 'Arial'].filter((f) => S.sysFonts[f]);
   const fontSel = field({ type: 'select', label: 'Estilo', options: fontOpts.length ? fontOpts : ['Arial'], value: fontOpts[0] });
   const typedPrev = h('canvas', { width: 760, height: 200, style: { width: '100%', background: '#fff', borderRadius: '10px', border: '1px dashed var(--line)' } });
   const drawTyped = () => {

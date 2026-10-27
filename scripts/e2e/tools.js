@@ -4,7 +4,7 @@ const path = require('node:path');
 const os = require('node:os');
 
 module.exports = async ({ run, shot, sleep, win }) => {
-  const OUT = path.join(os.tmpdir(), 'pdfmaster-e2e', 'tools');
+  const OUT = path.join(process.env.PM_E2E_DIR || path.join(os.tmpdir(), 'pdfmaster-e2e'), 'tools');
   fs.rmSync(OUT, { recursive: true, force: true });
   fs.mkdirSync(OUT, { recursive: true });
   process.env.PM_E2E_OUT = OUT;
@@ -77,6 +77,9 @@ module.exports = async ({ run, shot, sleep, win }) => {
 
   win.setSize(1440, 900);
   await sleep(1000);
+
+  check('fuentes del sistema detectadas (Arial)', (await run(`Object.keys(window.__pm.S.sysFonts).includes('Arial')`)) === true, await run(`Object.keys(window.__pm.S.sysFonts).join(', ')`));
+  check('plataforma', true, await run(`window.pm.platform + ' · ' + document.body.className`));
 
   // =============================== páginas
   await openDoc(A);
@@ -188,8 +191,11 @@ module.exports = async ({ run, shot, sleep, win }) => {
   check('texto a PDF', tt === 'nota.pdf' && (await textOf(await curBytes(), 1)).includes('Hola mundo'), tt + ' ' + await err());
   await run(`(()=>{ window.__pm.S.cur.dirty=false; return 1; })()`);
 
-  // Office a PDF (Word -> PDF) usando el .docx generado
-  if (docxOut) {
+  // Office a PDF: Word (Windows) o LibreOffice (macOS) usando el .docx generado
+  const sofficeMac = '/Applications/LibreOffice.app/Contents/MacOS/soffice';
+  const canOffice = process.platform === 'win32' || (process.platform === 'darwin' && fs.existsSync(sofficeMac));
+  if (!canOffice) console.log('  (omitida)  Office a PDF: no hay Microsoft Office ni LibreOffice en este equipo');
+  if (docxOut && canOffice) {
     process.env.PM_E2E_OPEN = JSON.stringify([path.join(OUT, docxOut)]);
     await start('office2pdf');
     const ok = await idle(120000);

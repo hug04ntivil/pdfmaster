@@ -1,0 +1,63 @@
+name: Verificar en macOS
+
+# Compila la app para Mac y ejecuta las mismas pruebas que en Windows (manual: pestaña Actions → Run workflow)
+on:
+  workflow_dispatch:
+
+env:
+  PM_E2E_DIR: ${{ github.workspace }}/e2e-out
+
+jobs:
+  verify:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node node_modules/electron/install.js
+      - name: Pruebas del motor PDF
+        run: npm test
+      - name: Compilar el .dmg (universal)
+        run: npm run dist:mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Inspeccionar la aplicación
+        run: |
+          APP="release/mac-universal/PDF Master.app"
+          ls release
+          lipo -archs "$APP/Contents/MacOS/PDF Master"
+          codesign -dv --verbose=2 "$APP" 2>&1 | head -12 || true
+          plutil -p "$APP/Contents/Info.plist" | grep -E "CFBundleDocumentTypes|CFBundleIdentifier|CFBundleShortVersionString|LSMinimumSystemVersion|CFBundleIconFile" || true
+          ls -la "$APP/Contents/Resources" | head -20
+          du -sh release/*.dmg
+      - name: Prueba de la app empaquetada
+        run: |
+          node -e "
+          const {PDFDocument,StandardFonts}=require('@cantoo/pdf-lib');
+          (async()=>{const d=await PDFDocument.create();const f=await d.embedFont(StandardFonts.Helvetica);for(let i=0;i<2;i++)d.addPage([400,500]).drawText('Hola Mac '+(i+1),{x:40,y:450,size:20,font:f});require('fs').writeFileSync('/tmp/muestra.pdf',await d.save());})()"
+          node scripts/e2e/packaged-smoke.mjs /tmp/muestra.pdf
+      - name: Acciones rápidas de Finder
+        continue-on-error: true
+        run: node scripts/e2e/qa-mac.mjs
+      - name: Instalar LibreOffice (prueba de Office a PDF)
+        continue-on-error: true
+        run: brew install --cask libreoffice
+      - name: E2E — humo
+        run: node scripts/e2e/run.mjs scripts/e2e/smoke.js 200
+      - name: E2E — herramientas
+        run: node scripts/e2e/run.mjs scripts/e2e/tools.js 900
+      - name: E2E — menú contextual (lanzamientos reales)
+        run: node scripts/e2e/run.mjs scripts/e2e/launch.js 300
+      - name: Guardar capturas y el instalador
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verificacion-mac
+          path: |
+            e2e-out/**
+            release/*.dmg
+          if-no-files-found: ignore
