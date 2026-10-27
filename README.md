@@ -1,6 +1,6 @@
 # PDF Master
 
-Programa de escritorio para Windows para hacer **todo** con archivos PDF: ver, editar, firmar, unir, dividir,
+Programa de escritorio para **Windows y macOS** para hacer **todo** con archivos PDF: ver, editar, firmar, unir, dividir,
 organizar, eliminar páginas, convertir a otros formatos, comprimir, proteger, OCR y más.
 Uso personal. Interfaz moderna en español (tema claro/oscuro), con el documento en grande al centro,
 miniaturas a la izquierda y **todas las herramientas a la derecha**.
@@ -56,6 +56,22 @@ src/convert.js           conversiones y OCR (Tesseract)
 src/app.js               interfaz: pestañas, barra superior, ajustes, atajos
 ```
 
+## macOS (MacBook)
+
+La misma aplicación, con las mismas herramientas, para Mac (Apple Silicon e Intel, macOS 11 o superior).
+
+1. Descarga **PDF-Master-<versión>-mac.dmg** desde [Releases](https://github.com/hug04ntivil/pdfmaster/releases/latest), ábrelo y arrastra **PDF Master** a **Aplicaciones**.
+2. La primera vez macOS avisará que no puede verificar al desarrollador (la app no está firmada con una cuenta de Apple Developer, que cuesta US$99 al año). Para abrirla una sola vez:
+   - **Ajustes del Sistema → Privacidad y seguridad → Abrir igualmente**, o
+   - en Terminal: `xattr -dr com.apple.quarantine "/Applications/PDF Master.app"`
+3. Atajos con ⌘ (⌘O abrir, ⌘S guardar, ⌘Z deshacer, ⌘F buscar…). El menú de la barra superior de macOS incluye Archivo y Edición.
+
+Diferencias con Windows:
+
+- **Clic derecho:** en Finder aparece en **Acciones rápidas** (*PDF Master - Unir PDFs*, *Comprimir*, *Firmar*…). Se instalan solas al abrir la app y se pueden quitar en **Ajustes → General**.
+- **Office → PDF:** usa LibreOffice si está instalado o Microsoft Office para Mac (Word, Excel, PowerPoint).
+- **Actualizaciones:** sin firma de Apple macOS no permite actualizar solo. **Ajustes → Actualizaciones → Buscar** avisa de la versión nueva y *Descargar el instalador* abre el .dmg; se reemplaza la app en Aplicaciones.
+- Las pruebas automáticas (motor, interfaz, menú contextual) se ejecutan en un Mac real de GitHub: pestaña *Actions → Verificar en macOS*.
 ## Menú contextual de Windows
 
 Al instalar, el clic derecho sobre un archivo añade accesos rápidos (solo para tu usuario, sin administrador):

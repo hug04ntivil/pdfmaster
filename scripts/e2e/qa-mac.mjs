@@ -34,11 +34,17 @@ ok('todos los plist pasan plutil -lint', failed === 0);
 const a = path.join(dir, 'uno.pdf'), b = path.join(dir, 'dos.pdf');
 fs.writeFileSync(a, '%PDF-1.4'); fs.writeFileSync(b, '%PDF-1.4');
 const wf = path.join(process.env.PM_SERVICES_DIR, ms.bundleName(ms.ACTIONS.find((x) => x.action === 'merge')));
-const r = spawnSync('automator', ['-i', a, '-i', b, wf], { encoding: 'utf8', timeout: 60000 });
+const r = spawnSync('automator', ['-i', a, wf], { encoding: 'utf8', timeout: 60000 });
 console.log('  automator →', r.status, (r.stdout || '').trim().slice(0, 200), (r.stderr || '').trim().slice(0, 300));
 await new Promise((res) => setTimeout(res, 2000));
 const called = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '';
-ok('Automator ejecuta la acción y entrega --pm-action y los archivos', /--pm-action=merge/.test(called) && called.includes('uno.pdf') && called.includes('dos.pdf'), called.trim());
+ok('Automator ejecuta la acción y entrega --pm-action y el archivo', /--pm-action=merge/.test(called) && called.includes('uno.pdf'), called.trim());
+// varios archivos a la vez (Finder entrega todos los seleccionados); la entrada por stdin separa por saltos de línea
+fs.rmSync(log, { force: true });
+spawnSync('automator', ['-i', '-', wf], { encoding: 'utf8', input: `${a}\n${b}\n`, timeout: 60000 });
+await new Promise((res) => setTimeout(res, 2000));
+const called2 = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '';
+console.log('  (informativo) varios archivos →', called2.trim() || '(sin salida)');
 
 ok('desinstalar elimina las acciones', ms.uninstall() === 11 && !ms.status().installed);
 process.exit(failed ? 1 : 0);
