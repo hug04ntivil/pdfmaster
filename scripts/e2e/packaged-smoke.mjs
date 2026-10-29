@@ -51,6 +51,7 @@ if (pdf) {
   for (let i = 0; i < 40; i++) { if (await ev(`[...document.querySelectorAll('.pcanvas')].some(c=>c.width>0)`)) break; await sleep(250); }
   console.log('  estado tras abrir:', await ev(`JSON.stringify({docs: window.__pm.S.docs.length, cur: !!window.__pm.S.cur, np: window.__pm.S.cur && window.__pm.S.cur.numPages, vpages: window.__pm.viewer.pages.length, canvases: [...document.querySelectorAll('.pcanvas')].map(c=>c.width), toasts: [...document.querySelectorAll('.toast')].map(t=>t.textContent), welcome: !document.querySelector('#welcome').hidden, win: innerWidth + 'x' + innerHeight, hidden: document.hidden, vis: document.visibilityState, scrollH: document.querySelector('#viewer-scroll').clientHeight, pageH: window.__pm.viewer.pages[0] && window.__pm.viewer.pages[0].el.offsetHeight, rendered: window.__pm.viewer.pages.map(p=>p.rendered), scrollVis: getComputedStyle(document.querySelector('#viewer-scroll')).visibility})`));
   ok('PDF abierto y dibujado en el visor', await ev(`[...document.querySelectorAll('.pcanvas')].some(c=>c.width>0)`), (await ev(`document.querySelectorAll('.thumb').length`)) + ' páginas');
+  for (let i = 0; i < 40; i++) { if ((await ev(`document.querySelectorAll('.textLayer span').length`)) > 0) break; await sleep(250); } // la capa de texto se dibuja después del lienzo
   ok('capa de texto presente', (await ev(`document.querySelectorAll('.textLayer span').length`)) > 0);
 }
 if (errs.length) console.log('  errores en la consola:\n   ' + errs.slice(0, 5).join('\n   ').slice(0, 900));
