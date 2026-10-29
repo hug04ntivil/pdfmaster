@@ -692,6 +692,59 @@ export async function applyTextEdit(pdfDoc, pageIndex, edit, ctx) {
   return { ok: true, usedFallback, fontName: fi.base, missing: [...missing].join(''), dropped: [...dropped].join(''), replaced: R, removedCount: endOp - startOp, shifted, dx: Math.round(dxUser * 100) / 100 };
 }
 
+/**
+ * Mueve un texto del PDF (dx, dy en unidades de usuario del PDF; y hacia arriba) sin tocar la fuente ni los caracteres.
+ * edit: {x, y, str, moveX, moveY}
+ */
+export async function moveText(pdfDoc, pageIndex, edit, ctx) {
+  const leaf = pageLeaf(pdfDoc, pageIndex);
+  const bytes = readContents(pdfDoc, leaf);
+  if (!bytes) return { ok: false, reason: 'contenido no editable' };
+  const ops = parseContent(bytes);
+  const shows = scanText(ops, loadPageFonts(pdfDoc, pageIndex), ctx.widthOf || (() => 500), bytes);
+  const win = locateItem(shows, edit);
+  if (!win) return { ok: false, reason: 'no se encontró el texto en el contenido de la página' };
+  if (win.some((s) => !s.upright)) return { ok: false, reason: 'texto girado' };
+  const fmt = (v) => String(Math.round(v * 10000) / 10000);
+  const patches = [];
+  let relative = null; // posición relativa (Td) del primer tramo: hay que compensar para no mover las líneas siguientes
+  for (let idx = 0; idx < win.length; idx++) {
+    const S = win[idx];
+    let posOp = null;
+    for (let q = S.k - 1; q >= 0; q--) {
+      const o = ops[q];
+      if (o.op === 'Tj' || o.op === 'TJ' || o.op === "'" || o.op === '"' || o.op === 'ET' || o.op === 'BT') break;
+      if (o.op === 'Tm' || o.op === 'Td' || o.op === 'TD' || o.op === 'T*') { posOp = o; break; }
+    }
+    const sx = (S.tm[0] * S.ctm[0]) || 1, sy = (S.tm[3] * S.ctm[3]) || 1;
+    const dxt = (edit.moveX || 0) / sx, dyt = (edit.moveY || 0) / sy;
+    if (posOp && posOp.op === 'Tm' && posOp.args.length >= 6) {
+      patches.push({ s: posOp.args[4].s, e: posOp.args[4].e, text: fmt(posOp.args[4].v + dxt) });
+      patches.push({ s: posOp.args[5].s, e: posOp.args[5].e, text: fmt(posOp.args[5].v + dyt) });
+    } else if (idx === 0 && posOp && (posOp.op === 'Td' || posOp.op === 'TD') && posOp.args.length >= 2) {
+      patches.push({ s: posOp.args[0].s, e: posOp.args[0].e, text: fmt(posOp.args[0].v + dxt) });
+      patches.push({ s: posOp.args[1].s, e: posOp.args[1].e, text: fmt(posOp.args[1].v + dyt) });
+      relative = { dxt, dyt };
+    } else if (idx === 0) return { ok: false, reason: 'este texto no se puede mover' };
+  }
+  if (relative) { // deshace el desplazamiento para que lo siguiente (posiciones relativas) quede donde estaba
+    const last = win[win.length - 1].op;
+    patches.push({ s: last.e, e: last.e, text: `\n${fmt(-relative.dxt)} ${fmt(-relative.dyt)} Td` });
+  }
+  patches.sort((a, b) => b.s - a.s);
+  let buf = bytes;
+  const enc = new TextEncoder();
+  for (const p of patches) {
+    const mid = enc.encode(p.text);
+    const nb = new Uint8Array(p.s + mid.length + (buf.length - p.e));
+    nb.set(buf.subarray(0, p.s), 0); nb.set(mid, p.s); nb.set(buf.subarray(p.e), p.s + mid.length);
+    buf = nb;
+  }
+  const c = pdfDoc.context;
+  leaf.set(PDFName.of('Contents'), c.register(c.flateStream(buf)));
+  return { ok: true, moved: true };
+}
+
 /** ¿Qué caracteres de `text` no tiene la fuente original? (para avisar al usuario) */
 export function missingChars(fi, text) {
   const out = new Set();
@@ -738,7 +791,14 @@ export async function applyTextEdits(pdfDoc, edits, ctxFor) {
   const results = new Array(edits.length);
   for (const { e, i } of order) {
     try {
-      results[i] = await applyTextEdit(pdfDoc, e.page, { x: e.x, y: e.y, str: e.str, newText: e.newText }, await ctxFor(e.page));
+      const c = await ctxFor(e.page);
+      let r = { ok: true, unchanged: true };
+      if (e.newText !== e.str) r = await applyTextEdit(pdfDoc, e.page, { x: e.x, y: e.y, str: e.str, newText: e.newText }, c);
+      if (r.ok && (e.moveX || e.moveY)) {
+        const m = await moveText(pdfDoc, e.page, { x: e.x, y: e.y, str: e.newText, moveX: e.moveX, moveY: e.moveY }, c);
+        r = m.ok ? { ...r, unchanged: false, moved: true } : { ...m, ok: false, textChanged: !r.unchanged };
+      }
+      results[i] = r;
     } catch (err) {
       results[i] = { ok: false, reason: String((err && err.message) || err) };
     }

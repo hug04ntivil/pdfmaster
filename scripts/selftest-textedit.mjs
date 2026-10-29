@@ -123,6 +123,36 @@ const before = await pdfjsInfo(word);
   ok(r.ok, 'Courier New (monoespaciada)', JSON.stringify(r));
 }
 
+console.log('Mover y borrar texto');
+{
+  const info = await pdfjsInfo(word);
+  const item = info.items.find((i) => i.str.includes('Condiciones'));
+  const doc = await E.loadDoc(word);
+  const r = await T.moveText(doc, 0, { x: item.x, y: item.y, str: item.str, moveX: 30, moveY: -12 }, mkctx(info.fonts));
+  const out = await E.saveDoc(doc);
+  const after = await pdfjsInfo(out);
+  const moved = after.items.find((i) => i.str.includes('Condiciones'));
+  ok(r.ok && moved && Math.abs(moved.x - (item.x + 30)) < 0.1 && Math.abs(moved.y - (item.y - 12)) < 0.1, 'mover un texto 30 pt a la derecha y 12 hacia abajo', `${item.x.toFixed(1)},${item.y.toFixed(1)} → ${moved && moved.x.toFixed(1)},${moved && moved.y.toFixed(1)}`);
+  ok(moved && moved.font === item.font && moved.str === item.str, 'el texto movido conserva fuente y contenido');
+  const rest = info.items.filter((i) => i.str.trim() && !i.str.includes('Condiciones')).every((i) => after.items.some((a) => a.str === i.str && Math.abs(a.x - i.x) < 0.1 && Math.abs(a.y - i.y) < 0.1));
+  ok(rest, 'el resto de los textos no se mueve');
+  if (saveDir) fs.writeFileSync(path.join(saveDir, 'word-mover.pdf'), out);
+}
+{
+  const { r, bytes } = await edit(word, 'Dirección: Av. Providencia 1234, Santiago, Chile.', '');
+  const after = await pdfjsInfo(bytes);
+  ok(r.ok && !after.items.some((i) => /Providencia|Dirección/.test(i.str)), 'borrar una línea completa de texto', JSON.stringify(r));
+  ok(after.items.some((i) => i.str.includes('Condiciones generales')) && after.items.some((i) => i.str.includes('Total a pagar')), 'las demás líneas siguen en su sitio');
+  // editar y mover a la vez (aplicando el lote como lo hace la aplicación)
+  const info = await pdfjsInfo(word);
+  const item = info.items.find((i) => i.str.includes('Monto total'));
+  const doc = await E.loadDoc(word);
+  const res = await T.applyTextEdits(doc, [{ page: 0, x: item.x, y: item.y, str: item.str, newText: item.str.replace('total', 'neto'), moveX: 0, moveY: 20 }], async () => mkctx(info.fonts));
+  const after2 = await pdfjsInfo(await E.saveDoc(doc));
+  const l = after2.items.find((i) => i.str.includes('Monto neto'));
+  ok(res[0].ok && l && Math.abs(l.y - (item.y + 20)) < 0.1, 'editar y mover a la vez', JSON.stringify(res[0]) + ' ' + (l ? l.y.toFixed(1) : '-'));
+}
+
 console.log('PDF creado con fuentes estándar (Helvetica sin incrustar)');
 {
   const d = await PDFDocument.create();

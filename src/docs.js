@@ -214,7 +214,7 @@ export class PdfDoc {
   async applyTextEdits(bytes, edits) {
     const doc = await E.loadDoc(bytes);
     const cache = {};
-    const results = await TE.applyTextEdits(doc, edits.map((o) => ({ page: o.page, x: o.ox, y: o.oy, str: o.str, newText: o.text })), async (p) => {
+    const results = await TE.applyTextEdits(doc, edits.map((o) => ({ page: o.page, x: o.ox, y: o.oy, str: o.str, newText: o.text, moveX: o.moveX, moveY: o.moveY })), async (p) => {
       if (!cache[p]) cache[p] = await pdfjsFontWidths(this.pdf, p);
       return { ...engineCtx, widthOf: widthFn(cache[p]) };
     });

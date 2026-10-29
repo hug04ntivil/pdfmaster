@@ -76,9 +76,10 @@ Diferencias con Windows:
 
 **Editar texto existente** reescribe el propio texto del PDF en lugar de taparlo con un recuadro:
 
-1. Pulsa la herramienta y haz clic sobre cualquier línea: se reconoce la fuente incrustada (Calibri, Arial, Times, Georgia…).
-2. Escribe. Mientras tanto el panel derecho dice qué letras ya tiene la fuente y cuáles no.
-3. Al salir del cuadro el cambio se aplica al PDF y se ve el resultado real (se puede deshacer).
+1. Pulsa **Editar texto existente**: todos los textos de la página se marcan con una caja.
+2. **Clic** en un texto para editarlo (se reconoce su fuente incrustada: Calibri, Arial, Times, Georgia…). El panel derecho dice qué letras ya tiene la fuente.
+3. **Arrastra** la caja para mover el texto; la **×** de la caja lo borra.
+4. **Clic fuera** (o *Enter*) aplica el cambio al instante y ves el resultado real. *Esc* cancela y *Ctrl+Z* deshace.
 
 - Las letras que la fuente original trae se dibujan **con esa misma fuente**, en el mismo tamaño y color.
 - Los PDFs incrustan solo las letras que usan (un *subconjunto*). Para una letra que falte se usa **la misma fuente instalada en el equipo** (p. ej. Calibri) o una de métricas idénticas incluida en la app: Carlito (Calibri), Caladea (Cambria), Arimo (Arial), Tinos (Times New Roman), Cousine (Courier New).

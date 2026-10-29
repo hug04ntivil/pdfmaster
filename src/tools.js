@@ -139,7 +139,7 @@ function clickTool(t) {
     const next = OV.tool === t.id && t.id !== 'select' ? 'select' : t.id;
     OV.setTool(next);
     const hints = {
-      text: 'Haz clic en la página para escribir.', edittext: 'Haz clic sobre un texto del PDF para reemplazarlo.', highlight: 'Selecciona texto con el ratón para resaltarlo.',
+      text: 'Haz clic en la página para escribir.', edittext: 'Haz clic en un texto para editarlo, arrástralo para moverlo o pulsa × para borrarlo.', highlight: 'Selecciona texto con el ratón para resaltarlo.',
       underline: 'Selecciona texto para subrayarlo.', strike: 'Selecciona texto para tacharlo.', redact: 'Dibuja recuadros sobre lo que quieras eliminar.', area: 'Arrastra para resaltar un área.',
       ink: 'Dibuja con el ratón sobre la página.', rect: 'Arrastra para dibujar.', ellipse: 'Arrastra para dibujar.', line: 'Arrastra (Mayús = ángulo fijo).', arrow: 'Arrastra (Mayús = ángulo fijo).', whiteout: 'Arrastra sobre lo que quieras tapar.',
     };

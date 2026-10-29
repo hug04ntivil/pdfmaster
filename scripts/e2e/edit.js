@@ -17,7 +17,14 @@ module.exports = async ({ run, shot, sleep, win }) => {
   const waitPaint = async () => { for (let i = 0; i < 60; i++) { if (await run(`[...document.querySelectorAll('.pcanvas')].some(c=>c.width>0) && document.querySelectorAll('.textLayer span').length>0`)) return; await sleep(200); } };
   const lineOf = (key) => run(`(async()=>{ const d=window.__pm.S.cur; const pg=await d.pdf.getPage(1); const tc=await pg.getTextContent(); const seed=tc.items.find(i=>i.str.trim() && i.str.includes(${JSON.stringify(key)})); if(!seed) return ''; const row=tc.items.filter(i=>Math.abs(i.transform[5]-seed.transform[5])<1.5).sort((a,b)=>a.transform[4]-b.transform[4]); return row.map(i=>i.str).join('').trim(); })()`);
   const fontOf = (key) => run(`(async()=>{ const d=window.__pm.S.cur; const pg=await d.pdf.getPage(1); const tc=await pg.getTextContent(); await pg.getOperatorList(); const seed=tc.items.find(i=>i.str.trim() && i.str.includes(${JSON.stringify(key)})); if(!seed) return ''; try { return pg.commonObjs.get(seed.fontName).name; } catch(e) { return 'sin datos'; } })()`);
-  const clickItem = (key) => run(`(async()=>{ const v=window.__pm.viewer; const pt=await v.pageText(0); const m=pt.map.find(m=>m.it.str.includes(${JSON.stringify(key)})); const r=v.rectsFor(pt,m.start,m.end)[0]; const l=document.querySelector('.ov-layer'); const b=l.getBoundingClientRect(); l.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:b.left+(r.x+Math.min(r.w/2,30))*v.scale,clientY:b.top+(r.y+r.h/2)*v.scale,button:0,pointerId:1})); return 1; })()`);
+  const waitBoxes = async () => { for (let i = 0; i < 80; i++) { if (await run(`document.querySelectorAll('.ov-tbox').length > 0`)) return true; await sleep(150); } return false; };
+  const boxOf = (key) => `(()=>{ const layer=document.querySelector('.ov-layer'); const k=layer._tb.findIndex(e=>e.m.it.str.includes(${JSON.stringify(key)})); return layer.querySelector('.ov-tbox[data-k="'+k+'"]'); })()`;
+  const clickItem = async (key) => { await waitBoxes(); return run(`(()=>{ const box=${boxOf(key)}; const b=box.getBoundingClientRect(); const x=b.left+Math.min(b.width/2,30), y=b.top+b.height/2; box.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:x,clientY:y,button:0,pointerId:1})); window.dispatchEvent(new PointerEvent('pointerup',{clientX:x,clientY:y,button:0,pointerId:1})); return 1; })()`); };
+  const dragItem = async (key, dx, dy) => { await waitBoxes(); return run(`(async()=>{ const box=${boxOf(key)}; const b=box.getBoundingClientRect(); const x=b.left+10, y=b.top+b.height/2; const ev=(t,px,py,tg)=>(tg||window).dispatchEvent(new PointerEvent(t,{bubbles:true,clientX:px,clientY:py,button:0,pointerId:1})); ev('pointerdown',x,y,box); for (let s=1;s<=6;s++) { ev('pointermove',x+${dx}*s/6,y+${dy}*s/6); await new Promise(r=>setTimeout(r,20)); } ev('pointerup',x+${dx},y+${dy}); return 1; })()`); };
+  const deleteItem = async (key) => { await waitBoxes(); return run(`(()=>{ const box=${boxOf(key)}; const x=box.querySelector('.x'); const b=x.getBoundingClientRect(); x.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:b.left+5,clientY:b.top+5,button:0,pointerId:1})); return 1; })()`); };
+  const clickOutside = () => run(`(()=>{ const l=document.querySelector('.ov-layer'); const b=l.getBoundingClientRect(); l.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:b.left+b.width*0.8,clientY:b.top+b.height*0.85,button:0,pointerId:1})); return 1; })()`);
+  const waitVersion = async (ver) => { for (let i = 0; i < 80; i++) { if ((await run('window.__pm.S.cur.version')) !== ver) break; await sleep(150); } await settle(); };
+  const itemPos = (key) => run(`(async()=>{ const d=window.__pm.S.cur; const pg=await d.pdf.getPage(1); const tc=await pg.getTextContent(); const it=tc.items.find(i=>i.str.trim() && i.str.includes(${JSON.stringify(key)})); return it ? JSON.stringify({x:it.transform[4], y:it.transform[5]}) : 'null'; })()`).then((s) => JSON.parse(s));
   const waitEditor = async () => { const t0 = Date.now(); for (let i = 0; i < 100; i++) { if (await run(`!!document.querySelector('.ov-textedit[contenteditable]') || window.__pm.S.cur.overlays.some(o=>o.type==='text' && o.linked)`)) return Date.now() - t0; await sleep(100); } return -1; };
   const settle = async () => { for (let i = 0; i < 80; i++) { if (await run('window.__pm.viewer.builtVersion === window.__pm.S.cur.version')) break; await sleep(150); } await idle(); await waitPaint(); await sleep(400); };
   const typeOnly = (text) => run(`(()=>{ const el=document.querySelector('.ov-textedit[contenteditable]'); if(!el) return 0; el.textContent=${JSON.stringify(text)}; el.dispatchEvent(new Event('input',{bubbles:true})); return 1; })()`);
@@ -71,6 +78,38 @@ module.exports = async ({ run, shot, sleep, win }) => {
   const l3 = await lineOf('Dirección');
   check('línea más larga con letras nuevas (Arial) reescrita', l3.includes('Apoquindo 5678, Las Condes'), l3);
   check('sigue siendo Arial', /Arial/.test(await fontOf('Dirección')), await fontOf('Dirección'));
+
+  // 3b) todas las cajas de texto visibles, arrastrar, borrar con × y clic fuera para aplicar
+  await run(`window.__pm.OV.setTool('edittext')`);
+  await waitBoxes();
+  const nBoxes = await run(`document.querySelectorAll('.ov-tbox').length`);
+  await settle();
+  await shot(path.join(OUT, '3a-cajas.png'));
+  check('al activar "Editar texto" se muestran todos los textos de la página como cajas', nBoxes >= 6, nBoxes + ' cajas');
+  const p0 = await itemPos('Condiciones');
+  const scale = await run('window.__pm.viewer.scale');
+  let ver = await run('window.__pm.S.cur.version');
+  await dragItem('Condiciones', 90, 36);
+  await waitVersion(ver);
+  const p1 = await itemPos('Condiciones');
+  check('arrastrar una caja mueve el texto en el PDF', Math.abs((p1.x - p0.x) - 90 / scale) < 0.6 && Math.abs((p1.y - p0.y) + 36 / scale) < 0.6, `Δx=${(p1.x - p0.x).toFixed(1)} (esperado ${(90 / scale).toFixed(1)}), Δy=${(p1.y - p0.y).toFixed(1)} (esperado ${(-36 / scale).toFixed(1)})`);
+  check('el texto movido conserva su fuente', /Times|Georgia|Cambria|Tinos/.test(await fontOf('Condiciones')), await fontOf('Condiciones'));
+  await shot(path.join(OUT, '3b-movido.png'));
+  await run(`window.__pm.OV.setTool('edittext')`);
+  await waitBoxes();
+  ver = await run('window.__pm.S.cur.version');
+  await deleteItem('Código de referencia');
+  await waitVersion(ver);
+  check('la × borra el texto del PDF', !(await lineOf('Código de referencia')) , await lineOf('Código'));
+  await run(`window.__pm.OV.setTool('edittext')`);
+  await waitBoxes();
+  await clickItem('Total a pagar');
+  console.log('     (análisis del texto: ' + (await waitEditor()) + ' ms)');
+  await typeOnly('Total a pagar: 3.450.000');
+  ver = await run('window.__pm.S.cur.version');
+  await clickOutside();
+  await waitVersion(ver);
+  check('clic fuera del texto aplica el cambio de inmediato', (await lineOf('Total a pagar')).includes('3.450.000'), await lineOf('Total a pagar'));
 
   // 4) PDF generado por Chromium (fuentes TrueType incrustadas en otro formato)
   const html = '<html><body style="font:18px Georgia,serif;margin:40px"><p>Presupuesto número 4521 aprobado por gerencia.</p><p style="font:16px Arial,sans-serif">Cliente: Constructora del Sur Ltda.</p></body></html>';

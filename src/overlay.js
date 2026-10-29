@@ -1,6 +1,6 @@
 // Capa de edición: texto, imágenes, firmas, formas, resaltados... (se incrustan en el PDF al guardar)
 import { S, emit } from './docs.js';
-import { h, uid, clamp, icon, field, hexToRgb01, toast, withBusy } from './util.js';
+import { h, uid, clamp, icon, field, hexToRgb01, toast, withBusy, sleep, status } from './util.js';
 import { STANDARD_FAMILIES, BUNDLED_FILES } from './engine.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -27,6 +27,7 @@ export function initOverlay(viewer) {
   OV.viewer = viewer;
   viewer.hooks.onMountPage = (el, i, layer) => mount(layer, i);
   viewer.hooks.onZoom = () => OV.renderAll();
+  viewer.hooks.onPageRendered = (i) => { if (OV.tool === 'edittext') renderTextBoxes(i); };
   document.addEventListener('mouseup', onSelectionMouseUp);
   document.addEventListener('pointerdown', (e) => {
     if (!e.target.closest('.ov') && !e.target.closest('#right') && !e.target.closest('#modal-root') && OV.selId) {
@@ -38,22 +39,29 @@ export function initOverlay(viewer) {
 function mount(layer, i) {
   layer.classList.toggle('active', DRAW_TOOLS.has(OV.tool));
   layer.addEventListener('pointerdown', (e) => onLayerDown(e, layer, i));
-  layer.addEventListener('pointermove', (e) => onLayerHover(e, layer, i));
   renderPageObjects(i);
 }
 
 OV.setTool = function (name) {
-  if (OV.tool === 'edittext' && name !== 'edittext') document.querySelectorAll('.ov-hover').forEach((n) => n.remove());
+  if (OV.tool === 'edittext' && name !== 'edittext') document.querySelectorAll('.ov-hover, .ov-tbox, .ov-tghost').forEach((n) => n.remove());
   OV.tool = name;
   document.querySelectorAll('.ov-layer').forEach((l) => {
     l.classList.toggle('active', DRAW_TOOLS.has(name));
     l.classList.toggle('tool-draw', ['rect', 'ellipse', 'line', 'arrow', 'ink', 'whiteout', 'redact', 'area'].includes(name));
-    l.classList.toggle('tool-text', name === 'text' || name === 'edittext');
+    l.classList.toggle('tool-text', name === 'text');
     l.classList.toggle('tool-place', name === 'place');
   });
   document.querySelectorAll('.textLayer').forEach((t) => t.classList.toggle('edit-mode', name === 'edittext'));
   if (name !== 'select' && name) OV.select(null);
+  if (name === 'edittext' && OV.viewer) OV.viewer.pages.forEach((p, i) => { if (p.rendered) renderTextBoxes(i); });
   emit('tool');
+};
+
+/** Espera a que termine la edición pendiente y el visor se reconstruya con el PDF nuevo. */
+OV.settle = async () => {
+  const d = doc();
+  if (OV.pending) { try { await OV.pending; } catch { /* ya se avisó */ } }
+  for (let k = 0; k < 80 && d && OV.viewer.builtVersion !== d.version; k++) await sleep(50);
 };
 
 // ---------------------------------------------------------------- utilidades de objetos
@@ -132,6 +140,7 @@ OV.hasPending = () => !!(doc() && doc().overlays.length);
 // ---------------------------------------------------------------- dibujo
 OV.renderAll = function () {
   if (!OV.viewer) return;
+  document.querySelectorAll('.ov-tbox, .ov-tghost').forEach((n) => n.remove());
   OV.viewer.pages.forEach((_, i) => renderPageObjects(i));
 };
 function renderPageObjects(i) {
@@ -316,9 +325,9 @@ function startEdit(o, el, { fresh = false } = {}) {
     o.text = el.textContent;
     if (o.type === 'textedit') {
       const d = doc();
-      OV.remove(o.id, { noHistory: true });
+      setTimeout(() => { try { OV.remove(o.id, { noHistory: true }); } catch { /* ya no está */ } }, 0);
       if (o.text === o.str) return;
-      withBusy('Aplicando el cambio…', async () => {
+      OV.pending = withBusy('Aplicando el cambio…', async () => {
         const r = await d.editTextNow(o);
         if (!r.ok) {
           d.checkpoint('Editar texto');
@@ -330,16 +339,23 @@ function startEdit(o, el, { fresh = false } = {}) {
       });
       return;
     }
-    if (!o.text.trim()) { OV.remove(o.id, { noHistory: true }); }
+    if (!o.text.trim()) setTimeout(() => { try { OV.remove(o.id, { noHistory: true }); } catch { /* ya no está */ } }, 0);
     else renderObject(o);
     emit('overlays');
   };
   el.addEventListener('blur', finish);
-  el.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); el.blur(); } e.stopPropagation(); });
+  el.addEventListener('keydown', (e) => {
+    if (o.type === 'textedit') {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); el.blur(); } // Enter aplica el cambio
+      else if (e.key === 'Escape') { e.preventDefault(); el.textContent = o.str; o.text = o.str; el.blur(); } // Esc cancela
+    } else if (e.key === 'Escape') { e.preventDefault(); el.blur(); }
+    e.stopPropagation();
+  });
 }
 
 // ---------------------------------------------------------------- herramientas sobre la capa
 function onLayerDown(e, layer, i) {
+  if (OV.tool === 'edittext') { onEditToolDown(e, layer, i); return; }
   if (e.button !== 0 || e.target !== layer) return;
   const tool = OV.tool;
   if (!DRAW_TOOLS.has(tool)) return;
@@ -365,11 +381,6 @@ function onLayerDown(e, layer, i) {
     OV.add({ type: 'image', page: i, x: p0.x - ww / 2, y: p0.y - hh / 2, w: ww, h: hh, src, opacity: 1 });
     OV.placing = null;
     OV.setTool('select');
-    return;
-  }
-  if (tool === 'edittext') {
-    e.preventDefault();
-    editExistingText(i, layer, p0);
     return;
   }
   e.preventDefault();
@@ -480,15 +491,121 @@ async function itemAt(i, p) {
   }
   return best;
 }
-async function onLayerHover(e, layer, i) {
-  if (OV.tool !== 'edittext') return;
-  const p = pts(layer, e);
-  const hit = await itemAt(i, p);
-  let box = layer.querySelector('.ov-hover');
-  if (!hit) { if (box) box.remove(); return; }
-  if (!box) { box = h('div', { class: 'ov-hover', style: { position: 'absolute', pointerEvents: 'none', border: '1.5px solid var(--accent)', background: 'rgba(214,40,74,.12)', borderRadius: '2px' } }); layer.append(box); }
-  Object.assign(box.style, { left: px(hit.r.x), top: px(hit.r.y), width: px(hit.r.w), height: px(hit.r.h) });
+/** Dibuja una caja sobre cada texto de la página: clic = editar, arrastrar = mover, × = borrar. */
+async function renderTextBoxes(i) {
+  const pg = OV.viewer.pages[i];
+  if (!pg || !doc()) return;
+  const layer = pg.ov;
+  const gen = (layer._tbGen = (layer._tbGen || 0) + 1);
+  const pt = await OV.viewer.pageText(i);
+  if (layer._tbGen !== gen || OV.tool !== 'edittext') return;
+  layer.querySelectorAll('.ov-tbox').forEach((n) => n.remove());
+  const list = [];
+  const frag = document.createDocumentFragment();
+  for (const m of pt.map) {
+    if (!m.it.str.trim()) continue;
+    const r = OV.viewer.rectsFor(pt, m.start, m.end)[0];
+    if (!r) continue;
+    const k = list.push({ m, r }) - 1;
+    const b = h('div', { class: 'ov-tbox', 'data-k': k }, h('span', { class: 'x', title: 'Borrar este texto' }, '×'));
+    Object.assign(b.style, { left: px(r.x - 1), top: px(r.y - 1), width: px(r.w + 2), height: px(r.h + 2) });
+    frag.append(b);
+  }
+  layer._tb = list;
+  layer.prepend(frag);
 }
+
+async function onEditToolDown(e, layer, i) {
+  if (e.button !== 0) return;
+  if (e.target.closest && e.target.closest('.ov-textedit')) return; // dentro del cuadro de edición: cursor normal
+  const ae = document.activeElement;
+  const hadEditor = !!(ae && ae.isContentEditable && ae.classList.contains('ov-textedit'));
+  const p0 = pts(layer, e);
+  const box = e.target.closest && e.target.closest('.ov-tbox');
+  const ent = box && layer._tb ? layer._tb[+box.dataset.k] : null;
+  const onX = !!(e.target.classList && e.target.classList.contains('x'));
+  if (hadEditor) {
+    // clic fuera del texto que se está editando: se aplica el cambio de inmediato
+    e.preventDefault();
+    ae.blur();
+    if (ae.isContentEditable) ae.dispatchEvent(new FocusEvent('blur')); // por si la ventana no tiene el foco del sistema
+    await OV.settle();
+    const hit = await itemAt(i, p0);
+    if (hit && !onX) await beginTextEdit(i, hit.m, hit.r);
+    return;
+  }
+  if (!ent) return;
+  e.preventDefault();
+  if (onX) { await deleteTextItem(i, ent.m, ent.r); return; }
+  startDragOrEdit(e, i, ent, box);
+}
+
+function startDragOrEdit(e, i, ent, box) {
+  const start = { x: e.clientX, y: e.clientY };
+  let dragging = false;
+  let ghost = null;
+  const move = (ev) => {
+    const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
+    if (!dragging && Math.hypot(dx, dy) > 5) {
+      dragging = true;
+      box.classList.add('drag-src');
+      ghost = h('div', { class: 'ov-tghost' }, ent.m.it.str);
+      Object.assign(ghost.style, { left: px(ent.r.x - 1), top: px(ent.r.y - 1), minWidth: px(ent.r.w + 2), height: px(ent.r.h + 2), lineHeight: px(ent.r.h + 2), fontSize: px(ent.r.h * 0.8) });
+      box.parentElement.append(ghost);
+    }
+    if (dragging) ghost.style.transform = `translate(${dx}px, ${dy}px)`;
+  };
+  const up = async (ev) => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    if (!dragging) { await beginTextEdit(i, ent.m, ent.r); return; }
+    box.classList.remove('drag-src');
+    if (ghost) ghost.remove();
+    const dx = (ev.clientX - start.x) / scale(), dy = (ev.clientY - start.y) / scale();
+    if (Math.hypot(dx, dy) < 1) return;
+    await moveTextItem(i, ent.m, ent.r, dx, dy);
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+
+/** Ejecuta un cambio sobre un texto del PDF: fiel si se puede; si no, se tapa y se escribe una copia con fuente equivalente. */
+async function changeTextItem(i, m, r, { text = m.it.str, dx = 0, dy = 0, busy = 'Aplicando el cambio…', done = '' }) {
+  const d0 = doc();
+  let probe = null;
+  if (OV.viewer.pages[i].proxy.rotate === 0) {
+    try { probe = await d0.probeText(i, { x: m.it.transform[4], y: m.it.transform[5], str: m.it.str, fontName: m.it.fontName }); } catch (err) { console.warn(err); }
+  }
+  const o = { page: i, ox: m.it.transform[4], oy: m.it.transform[5], str: m.it.str, text, moveX: dx, moveY: -dy };
+  if (probe && probe.ok) {
+    OV.pending = withBusy(busy, async () => {
+      const res = await d0.editTextNow(o);
+      if (res.ok) { if (done) toast(done, 'ok', 3500); return; }
+      fallbackText(i, m, r, text, dx, dy, probe);
+    });
+  } else { fallbackText(i, m, r, text, dx, dy, null); }
+  await OV.pending;
+}
+
+function fallbackText(i, m, r, text, dx, dy, probe) {
+  const d0 = doc();
+  d0.checkpoint('Editar texto');
+  const bg = sampleBg(i, r);
+  const size = probe ? probe.size : Math.hypot(m.t[2], m.t[3]) || m.it.height || 12;
+  const cover = { id: uid(), type: 'whiteout', page: i, x: r.x - 1, y: r.y, w: r.w + 2, h: r.h, color: bg };
+  const list = [cover];
+  if (text.trim()) {
+    const fname = String(m.it.fontName).toLowerCase();
+    list.push({ id: uid(), type: 'text', page: i, x: r.x + dx, y: r.y + dy + r.h / 2 - size * 0.6, text, size, family: probe && probe.sysFamily && S.sysFonts[probe.sysFamily] ? probe.sysFamily : probe ? probe.bundledFamily : /mono|courier/.test(fname) ? 'Courier' : 'Helvetica', bold: probe ? probe.bold : false, italic: probe ? probe.italic : false, color: probe ? probe.color : '#000000' });
+  }
+  list.forEach((x) => { d0.overlays.push(x); renderObject(x); });
+  toast('Esta fuente no se puede reescribir de forma exacta: se usó una equivalente.', '', 5000);
+  emit('overlays');
+}
+
+const deleteTextItem = (i, m, r) => changeTextItem(i, m, r, { text: '', busy: 'Borrando el texto…', done: 'Texto borrado (Ctrl+Z para deshacer)' });
+const moveTextItem = (i, m, r, dx, dy) => changeTextItem(i, m, r, { dx, dy, busy: 'Moviendo el texto…' });
+
 function sampleBg(i, r) {
   let bg = '#ffffff';
   try {
@@ -502,12 +619,9 @@ function sampleBg(i, r) {
   return bg;
 }
 
-async function editExistingText(i, layer, p) {
-  const hit = await itemAt(i, p);
-  if (!hit) return;
-  const { m, r } = hit;
+async function beginTextEdit(i, m, r) {
   const d0 = doc();
-  layer.querySelectorAll('.ov-hover').forEach((n) => n.remove());
+  document.querySelectorAll('.ov-hover').forEach((n) => n.remove());
   // ¿ya hay una edición pendiente de este mismo texto? se continúa
   const prev = d0.overlays.find((x) => x.type === 'textedit' && x.page === i && Math.abs(x.ox - m.it.transform[4]) < 0.5 && Math.abs(x.oy - m.it.transform[5]) < 0.5);
   if (prev) { OV.select(prev.id); startEdit(prev, null, { fresh: false }); return; }
@@ -606,9 +720,18 @@ OV.propsCard = function () {
   const get = (k, alt) => (o && o[k] !== undefined ? o[k] : alt);
   let title = '';
   switch (kind) {
-    case 'text':
     case 'edittext': {
-      title = kind === 'edittext' ? 'Editar texto existente' : 'Texto';
+      title = 'Editar texto existente';
+      const li = (ic, txt) => h('div', { style: { display: 'flex', gap: '8px', alignItems: 'flex-start', margin: '6px 0', fontSize: '12.5px', lineHeight: '1.4' } }, h('span', { style: { color: 'var(--accent)', flex: 'none', marginTop: '1px' } }, icon(ic, 15)), h('span', null, txt));
+      rows.push(li('pointer', 'Todos los textos de la página están marcados con una caja.'));
+      rows.push(li('text', 'Clic en un texto: se edita con su misma fuente.'));
+      rows.push(li('arrow', 'Arrastra una caja para mover el texto.'));
+      rows.push(li('trash', 'Pulsa la × de la caja para borrar ese texto.'));
+      rows.push(li('check', 'Clic fuera (o Enter) aplica el cambio al instante. Esc cancela. Ctrl+Z deshace.'));
+      break;
+    }
+    case 'text': {
+      title = 'Texto';
       const fams = [...new Set([...STANDARD_FAMILIES, ...Object.keys(S.sysFonts), ...Object.keys(BUNDLED_FILES)])];
       rows.push(row('Fuente', h('select', { onchange: (e) => apply({ family: e.target.value }, { family: e.target.value }) }, fams.map((f) => h('option', { value: f, selected: f === get('family', st.family) }, f)))));
       rows.push(row('Tamaño', num(Math.round(get('size', st.size) * 10) / 10, 4, 400, 1, (v) => apply({ size: v }, { size: v }))));

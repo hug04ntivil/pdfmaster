@@ -282,14 +282,16 @@ module.exports = async ({ run, shot, sleep, win }) => {
   check('sello colocado', (await run(`window.__pm.S.cur.overlays.filter(o=>o.type==='image').length`)) === 2);
   await shot(path.join(OUT, 'anotaciones.png'));
 
-  // editar texto existente
+  // editar texto existente: aparecen cajas sobre los textos y un clic abre el editor
   await run(`window.__pm.OV.setTool('edittext')`);
-  await sleep(200);
-  const pos = JSON.parse(await run(`(async()=>{ const v=window.__pm.viewer; const pt=await v.pageText(0); const m=pt.map.find(m=>/Linea 3/.test(m.it.str)); const r=v.rectsFor(pt,m.start,m.end)[0]; const l=document.querySelector('.ov-layer').getBoundingClientRect(); return JSON.stringify({x:l.left+(r.x+r.w/2)*v.scale, y:l.top+(r.y+r.h/2)*v.scale}); })()`));
-  await run(`(()=>{ const l=document.querySelector('.ov-layer'); l.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:${pos.x},clientY:${pos.y},button:0,pointerId:1})); return 1; })()`);
-  await sleep(700);
+  await run(`window.__pm.viewer.visibleIndexes().forEach((i) => window.__pm.viewer.renderPage(i))`); // si la ventana de pruebas está tapada, el visor no recibe avisos de visibilidad
+  for (let i = 0; i < 160; i++) { if (await run(`document.querySelectorAll('.ov-tbox').length > 0`)) break; await sleep(150); }
+  const nb = await run(`document.querySelectorAll('.ov-tbox').length`);
+  const clicked = await run(`(()=>{ const layer=[...document.querySelectorAll('.ov-layer')].find(l=>l._tb && l._tb.length); if(!layer) return 'sin cajas'; const k=layer._tb.findIndex(e=>/Linea|Documento/.test(e.m.it.str)); if (k<0) return 'sin caja: ' + (layer._tb||[]).map(e=>e.m.it.str.slice(0,12)).join('|').slice(0,200); const box=layer.querySelector('.ov-tbox[data-k="'+k+'"]'); const b=box.getBoundingClientRect(); const x=b.left+20, y=b.top+b.height/2; box.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:x,clientY:y,button:0,pointerId:1})); window.dispatchEvent(new PointerEvent('pointerup',{clientX:x,clientY:y,button:0,pointerId:1})); return 'ok'; })()`);
+  await sleep(900);
   const eo = await run(`window.__pm.S.cur.overlays.filter(o=>o.type==='textedit' || o.type==='whiteout' || (o.type==='text' && o.linked)).length`);
-  check('editar texto existente (abre el texto del PDF para editarlo)', eo >= 1, 'objetos: ' + eo);
+  const dg = eo >= 1 ? '' : ' | ' + await run(`JSON.stringify({tool: window.__pm.OV.tool, rendered: window.__pm.viewer.pages.map(p=>p.rendered), tb: [...document.querySelectorAll('.ov-layer')].map(l=>l._tb ? l._tb.length : null), built: window.__pm.viewer.builtVersion + '/' + window.__pm.S.cur.version, toasts: [...document.querySelectorAll('.toast')].map(x=>x.textContent)})`);
+  check('editar texto existente (abre el texto del PDF para editarlo)', eo >= 1, `cajas: ${nb}, clic: ${clicked}, objetos: ${eo}${dg}`);
 
   // redactar: dibujar zona sobre la línea 3 y aplicar
   await run(`document.activeElement && document.activeElement.blur()`);
