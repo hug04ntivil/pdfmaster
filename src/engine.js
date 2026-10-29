@@ -7,6 +7,29 @@ import fontkit from '@cantoo/fontkit';
 
 export const PRODUCER = 'PDF Master';
 
+/** Fuentes libres incluidas en la aplicación (métricas idénticas a Calibri, Cambria, Arial, Times New Roman y Courier New). [normal, negrita, cursiva, negrita-cursiva] */
+export const BUNDLED_FILES = {
+  Carlito: ['Carlito_400Regular.ttf', 'Carlito_700Bold.ttf', 'Carlito_400Regular_Italic.ttf', 'Carlito_700Bold_Italic.ttf'],
+  Caladea: ['Caladea_400Regular.ttf', 'Caladea_700Bold.ttf', 'Caladea_400Regular_Italic.ttf', 'Caladea_700Bold_Italic.ttf'],
+  Arimo: ['Arimo_400Regular.ttf', 'Arimo_700Bold.ttf', 'Arimo_400Regular_Italic.ttf', 'Arimo_700Bold_Italic.ttf'],
+  Tinos: ['Tinos_400Regular.ttf', 'Tinos_700Bold.ttf', 'Tinos_400Regular_Italic.ttf', 'Tinos_700Bold_Italic.ttf'],
+  Cousine: ['Cousine_400Regular.ttf', 'Cousine_700Bold.ttf', 'Cousine_400Regular_Italic.ttf', 'Cousine_700Bold_Italic.ttf'],
+};
+
+/**
+ * fontkit sin las tablas de mapas de bits/color: fuentes como Calibri o Courier New de Windows traen tablas CBDT/EBDT y
+ * fontkit las trata como glifos de imagen, lo que rompe la creación de subconjuntos al incrustarlas.
+ */
+export const fontkitSafe = {
+  ...fontkit,
+  create(bytes, ...rest) {
+    const f = fontkit.create(bytes, ...rest);
+    const fonts = f.fonts || [f];
+    for (const x of fonts) for (const t of ['CBDT', 'CBLC', 'EBDT', 'EBLC', 'sbix']) if (x.directory && x.directory.tables) delete x.directory.tables[t];
+    return f;
+  },
+};
+
 // ---------------------------------------------------------------- carga / guardado
 export async function loadDoc(bytes, password) {
   return PDFDocument.load(bytes, { password: password || undefined, updateMetadata: false });
@@ -94,8 +117,11 @@ export async function getFont(doc, ctx, family, bold = false, italic = false) {
   if (STD[family]) {
     const names = STD[family];
     font = await doc.embedFont(StandardFonts[names[tableIdx]]);
+  } else if (BUNDLED_FILES[family] && ctx && ctx.loadBundled) {
+    doc.registerFontkit(fontkitSafe);
+    font = await doc.embedFont(await ctx.loadBundled(BUNDLED_FILES[family][tableIdx]), { subset: true });
   } else if (ctx && ctx.systemFonts && ctx.systemFonts[family] && ctx.loadFont) {
-    doc.registerFontkit(fontkit);
+    doc.registerFontkit(fontkitSafe);
     const files = ctx.systemFonts[family];
     const bytes = await ctx.loadFont(files[tableIdx] || files[0]);
     font = await doc.embedFont(bytes, { subset: true });

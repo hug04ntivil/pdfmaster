@@ -288,8 +288,8 @@ module.exports = async ({ run, shot, sleep, win }) => {
   const pos = JSON.parse(await run(`(async()=>{ const v=window.__pm.viewer; const pt=await v.pageText(0); const m=pt.map.find(m=>/Linea 3/.test(m.it.str)); const r=v.rectsFor(pt,m.start,m.end)[0]; const l=document.querySelector('.ov-layer').getBoundingClientRect(); return JSON.stringify({x:l.left+(r.x+r.w/2)*v.scale, y:l.top+(r.y+r.h/2)*v.scale}); })()`));
   await run(`(()=>{ const l=document.querySelector('.ov-layer'); l.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:${pos.x},clientY:${pos.y},button:0,pointerId:1})); return 1; })()`);
   await sleep(700);
-  const eo = await run(`window.__pm.S.cur.overlays.filter(o=>o.type==='whiteout' || (o.type==='text' && o.linked)).length`);
-  check('editar texto existente (cubre y crea texto editable)', eo === 2, 'objetos: ' + eo);
+  const eo = await run(`window.__pm.S.cur.overlays.filter(o=>o.type==='textedit' || o.type==='whiteout' || (o.type==='text' && o.linked)).length`);
+  check('editar texto existente (abre el texto del PDF para editarlo)', eo >= 1, 'objetos: ' + eo);
 
   // redactar: dibujar zona sobre la línea 3 y aplicar
   await run(`document.activeElement && document.activeElement.blur()`);

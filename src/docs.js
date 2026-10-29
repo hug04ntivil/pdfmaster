@@ -1,6 +1,7 @@
 ﻿// Modelo de documento abierto: bytes, pdf.js, historial (deshacer/rehacer), guardado
 import * as pdfjs from 'pdfjs-dist';
 import * as E from './engine.js';
+import * as TE from './textedit.js';
 import { uid, dataUrlToBytes, canvasToBlob, blobToBytes, hexToRgb01, modal, h, field, toast, busy } from './util.js';
 
 const base = new URL('.', document.baseURI).href;
@@ -14,6 +15,7 @@ export const PDF_OPTS = {
   wasmUrl: new URL('pdfjs/wasm/', base).href,
   iccUrl: new URL('pdfjs/iccs/', base).href,
   isEvalSupported: false,
+  fontExtraProperties: true, // expone anchos y datos de las fuentes incrustadas (edición de texto fiel)
 };
 
 /** Estado global de la aplicación */
@@ -28,9 +30,28 @@ export const S = {
 export const onChange = (fn) => S.listeners.add(fn);
 export const emit = (what) => S.listeners.forEach((fn) => { try { fn(what); } catch (e) { console.error(e); } });
 
+const FONTS_URL = new URL('fonts/', base).href;
 export const engineCtx = {
   get systemFonts() { return S.sysFonts; },
   loadFont: (file) => window.pm.readFont(file),
+  loadBundled: async (file) => new Uint8Array(await (await fetch(FONTS_URL + file)).arrayBuffer()),
+};
+
+/** Anchos de glifo de las fuentes de una página según pdf.js, por nombre de fuente (BaseFont). */
+export async function pdfjsFontWidths(pdf, pageIndex) {
+  const page = await pdf.getPage(pageIndex + 1);
+  const tc = await page.getTextContent();
+  await page.getOperatorList();
+  const out = {};
+  for (const n of new Set(tc.items.map((i) => i.fontName))) {
+    try { const f = page.commonObjs.get(n); out[f.name] = { widths: f.widths, defaultWidth: f.defaultWidth, loaded: n }; } catch { /* fuente sin datos */ }
+  }
+  return out;
+}
+const widthFn = (fonts) => (fi, code) => {
+  const f = fonts[fi.baseFull];
+  const w = f && f.widths && f.widths[code];
+  return typeof w === 'number' ? w : (f && f.defaultWidth) || 500;
 };
 
 export async function askPassword(name, wrong) {
@@ -163,9 +184,72 @@ export class PdfDoc {
   }
 
   /** Incrusta en el PDF las anotaciones pendientes (texto, firmas, formas...). */
+  /** ¿Se puede editar este texto conservando su fuente? (se guarda en caché por versión del documento) */
+  async probeText(pageIndex, item) {
+    if (!this._pl || this._plVersion !== this.version) { this._pl = await E.loadDoc(this.bytes); this._plVersion = this.version; this._plWidths = {}; }
+    if (!this._plWidths[pageIndex]) this._plWidths[pageIndex] = await pdfjsFontWidths(this.pdf, pageIndex);
+    const fonts = this._plWidths[pageIndex];
+    const r = TE.probeItem(this._pl, pageIndex, item, { widthOf: widthFn(fonts) });
+    if (r.ok) { const f = Object.values(fonts).find((x) => x.loaded === item.fontName); r.loaded = f ? f.loaded : item.fontName; }
+    return r;
+  }
+
+  /** Alternativa cuando el texto no se puede reescribir: se tapa el original y se escribe encima con una fuente equivalente. */
+  fallbackOverlays(o) {
+    return [
+      { id: o.id + 'c', type: 'whiteout', page: o.page, x: o.x - 1, y: o.y, w: o.w + 2, h: o.h, color: o.cover || '#ffffff' },
+      { id: o.id + 't', type: 'text', page: o.page, x: o.x, y: o.y + o.h / 2 - o.size * 0.6, text: o.text, size: o.size, family: o.sysFamily && S.sysFonts[o.sysFamily] ? o.sysFamily : o.bundledFamily || 'Helvetica', bold: !!o.bold, italic: !!o.italic, color: o.color || '#000000' },
+    ];
+  }
+
+  /** Edita ahora mismo un texto del PDF (se ve el resultado real) con punto de restauración. */
+  async editTextNow(o) {
+    const { bytes, results } = await this.applyTextEdits(this.bytes, [o]);
+    const r = results[0];
+    if (r.ok && !r.unchanged) await this.applyBytes(bytes, 'Editar texto');
+    return r;
+  }
+
+  /** Aplica las ediciones de texto fieles. Devuelve los bytes nuevos y el resultado de cada una. */
+  async applyTextEdits(bytes, edits) {
+    const doc = await E.loadDoc(bytes);
+    const cache = {};
+    const results = await TE.applyTextEdits(doc, edits.map((o) => ({ page: o.page, x: o.ox, y: o.oy, str: o.str, newText: o.text })), async (p) => {
+      if (!cache[p]) cache[p] = await pdfjsFontWidths(this.pdf, p);
+      return { ...engineCtx, widthOf: widthFn(cache[p]) };
+    });
+    return { bytes: results.some((r) => r.ok && !r.unchanged) ? await E.saveDoc(doc) : bytes, results };
+  }
+
   async commit() {
     if (!this.overlays.length) return;
-    const list = this.overlays;
+    let list = this.overlays;
+    let base = this.bytes;
+    const tedits = list.filter((o) => o.type === 'textedit' && o.text !== o.str);
+    list = list.filter((o) => o.type !== 'textedit');
+    const notes = [];
+    if (tedits.length) {
+      const { bytes: nb, results } = await this.applyTextEdits(base, tedits);
+      base = nb;
+      results.forEach((r, i) => {
+        const o = tedits[i];
+        if (!r.ok) {
+          // no se pudo reescribir el texto original: se tapa y se escribe encima con una fuente equivalente
+          list.push(...this.fallbackOverlays(o));
+          notes.push(`«${o.str.slice(0, 24)}»: ${r.reason} (se usó una fuente equivalente)`);
+        } else if (r.dropped) notes.push(`Sin fuente disponible para: ${r.dropped}`);
+      });
+    }
+    if (notes.length) setTimeout(() => toast(notes.join(' · '), '', 8000), 100);
+    if (!list.length) {
+      if (base === this.bytes) { this.overlays = []; return; }
+      this.checkpoint('Aplicar cambios');
+      this.overlays = [];
+      this.bytes = base;
+      await this.openPdf();
+      emit('bytes');
+      return;
+    }
     const prepared = list.filter((o) => o.type !== 'redact').map((o) => {
       const c = { ...o };
       if (typeof c.color === 'string') c.color = hexToRgb01(c.color);
@@ -175,7 +259,7 @@ export class PdfDoc {
       }
       return c;
     });
-    let out = await E.commitOverlays(this.bytes, prepared, engineCtx);
+    let out = await E.commitOverlays(base, prepared, engineCtx);
     const redacts = list.filter((o) => o.type === 'redact');
     if (redacts.length) out = await this.applyRedactions(out, redacts);
     this.checkpoint('Aplicar cambios');

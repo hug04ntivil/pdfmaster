@@ -1,7 +1,7 @@
 // Capa de edición: texto, imágenes, firmas, formas, resaltados... (se incrustan en el PDF al guardar)
 import { S, emit } from './docs.js';
-import { h, uid, clamp, icon, field, hexToRgb01 } from './util.js';
-import { STANDARD_FAMILIES } from './engine.js';
+import { h, uid, clamp, icon, field, hexToRgb01, toast, withBusy } from './util.js';
+import { STANDARD_FAMILIES, BUNDLED_FILES } from './engine.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 const DRAW_TOOLS = new Set(['text', 'rect', 'ellipse', 'line', 'arrow', 'ink', 'whiteout', 'redact', 'area', 'place', 'edittext']);
@@ -165,6 +165,17 @@ function buildEl(o) {
       el.append(rz());
       el.addEventListener('dblclick', () => startEdit(o, el));
       break;
+    case 'textedit': {
+      el = h('div', { class: 'ov ov-text ov-textedit', 'data-id': o.id });
+      el.textContent = o.text;
+      const fams = [o.sysFamily ? `"${o.sysFamily}"` : '', `"${o.bundledFamily}"`, 'sans-serif'].filter(Boolean).join(', ');
+      Object.assign(el.style, {
+        left: px(o.x - 1), top: px(o.y), minWidth: px(o.w + 2), height: px(o.h), lineHeight: px(o.h), fontSize: px(o.size), color: o.color,
+        fontFamily: fams, fontWeight: o.bold ? '700' : '400', fontStyle: o.italic ? 'italic' : 'normal', background: o.cover, whiteSpace: 'pre', padding: '0 1px', cursor: 'text',
+      });
+      el.addEventListener('dblclick', () => startEdit(o, el));
+      break;
+    }
     case 'image':
       el = h('div', { class: 'ov ov-img', 'data-id': o.id }, h('img', { src: o.src, draggable: false }), rz());
       Object.assign(el.style, { left: px(o.x), top: px(o.y), width: px(o.w), height: px(o.h), opacity: o.opacity ?? 1 });
@@ -239,6 +250,7 @@ function buildEl(o) {
 function onObjDown(e, o, el) {
   if (e.button !== 0) return;
   if (el.isContentEditable) return;
+  if (o.type === 'textedit') { e.stopPropagation(); OV.select(o.id); return; }
   if (DRAW_TOOLS.has(OV.tool) && OV.tool !== 'select') return; // las herramientas de dibujo trabajan sobre la capa
   e.stopPropagation();
   OV.select(o.id);
@@ -291,16 +303,33 @@ function startEdit(o, el, { fresh = false } = {}) {
   const r = document.createRange();
   r.selectNodeContents(el);
   if (!fresh) sel.removeAllRanges(), sel.addRange(r);
-  let checkpointed = fresh;
+  let checkpointed = fresh || o.type === 'textedit';
   el.addEventListener('input', () => {
     if (!checkpointed) { doc().checkpoint('Editar texto'); checkpointed = true; }
     o.text = el.textContent;
     doc().dirty = true;
+    if (o.type === 'textedit') emit('selection');
   });
   const finish = () => {
     el.removeEventListener('blur', finish);
     el.contentEditable = 'false';
     o.text = el.textContent;
+    if (o.type === 'textedit') {
+      const d = doc();
+      OV.remove(o.id, { noHistory: true });
+      if (o.text === o.str) return;
+      withBusy('Aplicando el cambio…', async () => {
+        const r = await d.editTextNow(o);
+        if (!r.ok) {
+          d.checkpoint('Editar texto');
+          for (const x of d.fallbackOverlays(o)) { d.overlays.push(x); renderObject(x); }
+          toast('Esta fuente no se puede reescribir de forma exacta: se usó una equivalente. (' + r.reason + ')', '', 6000);
+          emit('overlays');
+        } else if (r.dropped) toast('Ninguna fuente disponible tiene: ' + r.dropped, '', 6000);
+        else if (r.usedFallback) toast('Se usó ' + r.usedFallback + ' solo para: ' + r.missing, '', 4500);
+      });
+      return;
+    }
     if (!o.text.trim()) { OV.remove(o.id, { noHistory: true }); }
     else renderObject(o);
     emit('overlays');
@@ -460,30 +489,58 @@ async function onLayerHover(e, layer, i) {
   if (!box) { box = h('div', { class: 'ov-hover', style: { position: 'absolute', pointerEvents: 'none', border: '1.5px solid var(--accent)', background: 'rgba(214,40,74,.12)', borderRadius: '2px' } }); layer.append(box); }
   Object.assign(box.style, { left: px(hit.r.x), top: px(hit.r.y), width: px(hit.r.w), height: px(hit.r.h) });
 }
-async function editExistingText(i, layer, p) {
-  const hit = await itemAt(i, p);
-  if (!hit) return;
-  const { m, r } = hit;
-  const [a, b, c, d] = m.t;
-  const size = Math.hypot(c, d) || m.it.height || 12;
-  const style = (await OV.viewer.pages[i].proxy.getTextContent()).styles[m.it.fontName] || {};
-  const family = /mono|courier/i.test(style.fontFamily || '') ? 'Courier' : /serif/i.test(style.fontFamily || '') && !/sans/i.test(style.fontFamily || '') ? 'Times' : 'Helvetica';
-  const bold = /bold|black|heavy/i.test(m.it.fontName + ' ' + (style.fontFamily || ''));
-  // color de fondo muestreado de la página para tapar el texto original
+function sampleBg(i, r) {
   let bg = '#ffffff';
   try {
     const cv = OV.viewer.pages[i].canvas;
     if (cv.width) {
       const k = cv.width / OV.viewer.pages[i].w;
-      const ctx = cv.getContext('2d');
-      const sx = clamp(Math.round((r.x - 1.5) * k), 0, cv.width - 1), sy = clamp(Math.round((r.y + r.h / 2) * k), 0, cv.height - 1);
-      const px4 = ctx.getImageData(sx, sy, 1, 1).data;
+      const px4 = cv.getContext('2d').getImageData(clamp(Math.round((r.x - 1.5) * k), 0, cv.width - 1), clamp(Math.round((r.y + r.h / 2) * k), 0, cv.height - 1), 1, 1).data;
       bg = '#' + [px4[0], px4[1], px4[2]].map((v) => v.toString(16).padStart(2, '0')).join('');
     }
-  } catch {}
-  void a; void b;
+  } catch { /* sin muestra de color */ }
+  return bg;
+}
+
+async function editExistingText(i, layer, p) {
+  const hit = await itemAt(i, p);
+  if (!hit) return;
+  const { m, r } = hit;
   const d0 = doc();
+  layer.querySelectorAll('.ov-hover').forEach((n) => n.remove());
+  // ¿ya hay una edición pendiente de este mismo texto? se continúa
+  const prev = d0.overlays.find((x) => x.type === 'textedit' && x.page === i && Math.abs(x.ox - m.it.transform[4]) < 0.5 && Math.abs(x.oy - m.it.transform[5]) < 0.5);
+  if (prev) { OV.select(prev.id); startEdit(prev, null, { fresh: false }); return; }
+
+  // 1) edición fiel: se reescribe el propio texto del PDF con su fuente incrustada
+  let probe = null;
+  if (OV.viewer.pages[i].proxy.rotate === 0) {
+    try { probe = await d0.probeText(i, { x: m.it.transform[4], y: m.it.transform[5], str: m.it.str, fontName: m.it.fontName }); } catch (e) { console.warn('edición fiel no disponible', e); }
+  }
+  const bg = sampleBg(i, r);
+  if (probe && probe.ok) {
+    const o = {
+      id: uid(), type: 'textedit', page: i, x: r.x, y: r.y, w: r.w, h: r.h, ox: m.it.transform[4], oy: m.it.transform[5], str: m.it.str, text: m.it.str,
+      size: probe.size, color: probe.color, cover: bg, loaded: probe.loaded, fontBase: probe.fontBase, avail: probe.avail,
+      sysFamily: probe.sysFamily, bundledFamily: probe.bundledFamily, bold: probe.bold, italic: probe.italic,
+    };
+    d0.overlays.push(o);
+    renderObject(o);
+    OV.select(o.id);
+    startEdit(o, null, { fresh: false });
+    emit('overlays');
+    return;
+  }
+
+  // 2) alternativa: se tapa el texto y se escribe encima con la fuente más parecida
   d0.checkpoint('Editar texto existente');
+  const [a, b, c, d] = m.t;
+  const size = Math.hypot(c, d) || m.it.height || 12;
+  const style = (await OV.viewer.pages[i].proxy.getTextContent()).styles[m.it.fontName] || {};
+  const fname = (m.it.fontName + ' ' + (style.fontFamily || '')).toLowerCase();
+  const family = /mono|courier/.test(fname) ? 'Courier' : /serif/.test(fname) && !/sans/.test(fname) ? 'Times' : 'Helvetica';
+  const bold = /bold|black|heavy/.test(fname);
+  void a; void b;
   const cover = { id: uid(), type: 'whiteout', page: i, x: r.x - 1, y: r.y, w: r.w + 2, h: r.h, color: bg };
   const o = { id: uid(), type: 'text', page: i, x: r.x, y: r.y + r.h / 2 - size * 0.6, text: m.it.str, size, family, bold, italic: false, color: '#000000', linked: cover.id };
   cover.linked = o.id;
@@ -491,8 +548,8 @@ async function editExistingText(i, layer, p) {
   renderObject(cover);
   renderObject(o);
   OV.select(o.id);
-  layer.querySelectorAll('.ov-hover').forEach((n) => n.remove());
   startEdit(o, null, { fresh: false });
+  toast('Esta fuente no se puede editar de forma exacta: se usará una equivalente.', '', 5000);
   emit('overlays');
 }
 
@@ -552,12 +609,23 @@ OV.propsCard = function () {
     case 'text':
     case 'edittext': {
       title = kind === 'edittext' ? 'Editar texto existente' : 'Texto';
-      const fams = [...STANDARD_FAMILIES, ...Object.keys(S.sysFonts)];
+      const fams = [...new Set([...STANDARD_FAMILIES, ...Object.keys(S.sysFonts), ...Object.keys(BUNDLED_FILES)])];
       rows.push(row('Fuente', h('select', { onchange: (e) => apply({ family: e.target.value }, { family: e.target.value }) }, fams.map((f) => h('option', { value: f, selected: f === get('family', st.family) }, f)))));
       rows.push(row('Tamaño', num(Math.round(get('size', st.size) * 10) / 10, 4, 400, 1, (v) => apply({ size: v }, { size: v }))));
       const tog = (key, ic, ttl) => h('button', { class: get(key, st[key]) ? 'on' : '', title: ttl, onclick: (e) => { const v = !get(key, st[key]); e.currentTarget.classList.toggle('on', v); apply({ [key]: v }, { [key]: v }); } }, ic);
       rows.push(row('Estilo', h('div', { class: 'seg' }, tog('bold', h('b', null, 'N'), 'Negrita'), tog('italic', h('i', null, 'K'), 'Cursiva'), tog('underline', h('u', null, 'S'), 'Subrayado'))));
       rows.push(row('Color', colorInput(get('color', st.color), (v) => apply({ color: v }, { color: v }))));
+      break;
+    }
+    case 'textedit': {
+      title = 'Texto del PDF';
+      const have = new Set([...(o.avail || '')]);
+      const missing = [...new Set([...(o.text || '')].filter((ch) => !/\s/.test(ch) && !have.has(ch)))];
+      rows.push(h('div', { style: { fontSize: '12.5px', lineHeight: '1.45' } },
+        h('div', null, 'Fuente original: ', h('b', null, o.fontBase)),
+        missing.length
+          ? h('div', { style: { color: 'var(--muted)', marginTop: '4px' } }, `El PDF no trae «${missing.join('')}»: se dibujará con ${o.sysFamily || o.bundledFamily} (equivalente de la misma familia).`)
+          : h('div', { style: { color: 'var(--muted)', marginTop: '4px' } }, 'Todas las letras existen en la fuente original: se mantiene exactamente.')));
       break;
     }
     case 'rect':

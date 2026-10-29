@@ -50,6 +50,8 @@ jobs:
         run: node scripts/e2e/run.mjs scripts/e2e/smoke.js 200
       - name: E2E — herramientas
         run: node scripts/e2e/run.mjs scripts/e2e/tools.js 900
+      - name: E2E — edición de texto fiel (Word, Chromium, LibreOffice)
+        run: node scripts/e2e/run.mjs scripts/e2e/edit.js 400
       - name: E2E — menú contextual (lanzamientos reales)
         run: node scripts/e2e/run.mjs scripts/e2e/launch.js 300
       - name: Guardar capturas y el instalador

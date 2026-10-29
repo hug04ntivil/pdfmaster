@@ -36,6 +36,16 @@ copy(nm('pdfjs-dist', 'web', 'pdf_viewer.css'), path.join(dist, 'pdf_viewer.css'
 copy(path.join(root, 'assets', 'icon.png'), path.join(dist, 'icon.png'));
 copy(path.join(root, 'assets', 'icon.svg'), path.join(dist, 'icon.svg'));
 
+// Fuentes de respaldo para la edición de texto (Carlito, Caladea, Arimo, Tinos, Cousine: licencias libres OFL/Apache)
+for (const fam of ['carlito', 'caladea', 'arimo', 'tinos', 'cousine']) {
+  const dir = nm('@expo-google-fonts', fam);
+  for (const sub of fs.readdirSync(dir)) {
+    const d = path.join(dir, sub);
+    if (!fs.statSync(d).isDirectory()) continue;
+    for (const f of fs.readdirSync(d)) if (/^(Carlito|Caladea|Arimo|Tinos|Cousine)_(400Regular|700Bold)(_Italic)?\.ttf$/.test(f)) copy(path.join(d, f), path.join(dist, 'fonts', f));
+  }
+}
+
 // pdf.js: worker + recursos (cmaps, fuentes estándar, decodificadores wasm)
 copy(nm('pdfjs-dist', 'build', 'pdf.worker.min.mjs'), path.join(dist, 'pdfjs', 'pdf.worker.mjs'));
 copy(nm('pdfjs-dist', 'cmaps'), path.join(dist, 'pdfjs', 'cmaps'));

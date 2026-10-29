@@ -188,6 +188,7 @@ function setupE2E() {
   wc.once('did-finish-load', async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     try {
+      try { win.show(); win.focus(); app.focus({ steal: true }); wc.focus(); } catch { /* sin foco: se dispara blur a mano en las pruebas */ }
       const drv = require(path.resolve(process.env.PM_E2E));
       await drv({
         win, wc, app, sleep, logs,

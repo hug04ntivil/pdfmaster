@@ -1,3 +1,25 @@
+/* Fuentes de respaldo incluidas (equivalentes métricos de Calibri, Cambria, Arial, Times New Roman, Courier New) */
+@font-face { font-family: "Carlito"; font-weight: 400; font-style: normal; src: url("fonts/Carlito_400Regular.ttf") format("truetype"); }
+@font-face { font-family: "Carlito"; font-weight: 700; font-style: normal; src: url("fonts/Carlito_700Bold.ttf") format("truetype"); }
+@font-face { font-family: "Carlito"; font-weight: 400; font-style: italic; src: url("fonts/Carlito_400Regular_Italic.ttf") format("truetype"); }
+@font-face { font-family: "Carlito"; font-weight: 700; font-style: italic; src: url("fonts/Carlito_700Bold_Italic.ttf") format("truetype"); }
+@font-face { font-family: "Caladea"; font-weight: 400; font-style: normal; src: url("fonts/Caladea_400Regular.ttf") format("truetype"); }
+@font-face { font-family: "Caladea"; font-weight: 700; font-style: normal; src: url("fonts/Caladea_700Bold.ttf") format("truetype"); }
+@font-face { font-family: "Caladea"; font-weight: 400; font-style: italic; src: url("fonts/Caladea_400Regular_Italic.ttf") format("truetype"); }
+@font-face { font-family: "Caladea"; font-weight: 700; font-style: italic; src: url("fonts/Caladea_700Bold_Italic.ttf") format("truetype"); }
+@font-face { font-family: "Arimo"; font-weight: 400; font-style: normal; src: url("fonts/Arimo_400Regular.ttf") format("truetype"); }
+@font-face { font-family: "Arimo"; font-weight: 700; font-style: normal; src: url("fonts/Arimo_700Bold.ttf") format("truetype"); }
+@font-face { font-family: "Arimo"; font-weight: 400; font-style: italic; src: url("fonts/Arimo_400Regular_Italic.ttf") format("truetype"); }
+@font-face { font-family: "Arimo"; font-weight: 700; font-style: italic; src: url("fonts/Arimo_700Bold_Italic.ttf") format("truetype"); }
+@font-face { font-family: "Tinos"; font-weight: 400; font-style: normal; src: url("fonts/Tinos_400Regular.ttf") format("truetype"); }
+@font-face { font-family: "Tinos"; font-weight: 700; font-style: normal; src: url("fonts/Tinos_700Bold.ttf") format("truetype"); }
+@font-face { font-family: "Tinos"; font-weight: 400; font-style: italic; src: url("fonts/Tinos_400Regular_Italic.ttf") format("truetype"); }
+@font-face { font-family: "Tinos"; font-weight: 700; font-style: italic; src: url("fonts/Tinos_700Bold_Italic.ttf") format("truetype"); }
+@font-face { font-family: "Cousine"; font-weight: 400; font-style: normal; src: url("fonts/Cousine_400Regular.ttf") format("truetype"); }
+@font-face { font-family: "Cousine"; font-weight: 700; font-style: normal; src: url("fonts/Cousine_700Bold.ttf") format("truetype"); }
+@font-face { font-family: "Cousine"; font-weight: 400; font-style: italic; src: url("fonts/Cousine_400Regular_Italic.ttf") format("truetype"); }
+@font-face { font-family: "Cousine"; font-weight: 700; font-style: italic; src: url("fonts/Cousine_700Bold_Italic.ttf") format("truetype"); }
+
 :root {
   --accent: #d6284a;
   --accent-2: #b3123c;
@@ -132,6 +154,8 @@ body.mac #titlebar { padding-left: 84px; padding-right: 14px; }
 .ov .rz { display: none; position: absolute; right: -9px; bottom: -9px; width: 12px; height: 12px; background: var(--accent); border: 2px solid #fff; border-radius: 3px; cursor: nwse-resize; }
 .ov-text { white-space: pre; line-height: 1.2; padding: 0; min-width: 8px; min-height: 1em; outline: none; cursor: move; }
 .ov-text[contenteditable="true"] { cursor: text; user-select: text; }
+.ov-textedit { cursor: text; outline: 1px dashed var(--accent); outline-offset: 1px; }
+.ov-textedit[contenteditable="true"] { box-shadow: 0 0 0 2px var(--accent-soft); }
 .ov-img img { width: 100%; height: 100%; display: block; pointer-events: none; -webkit-user-drag: none; }
 .ov-img { cursor: move; }
 .ov-shape { cursor: move; }

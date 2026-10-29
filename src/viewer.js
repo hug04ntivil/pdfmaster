@@ -72,6 +72,7 @@ export class Viewer {
     this.applyZoom(doc.zoomMode === 'custom' ? doc.zoom : doc.zoomMode, true);
     this.pages.forEach((p) => this.io.observe(p.el));
     this.scroll.scrollTop = top;
+    this.builtVersion = doc.version; // versión del documento cuyas páginas ya están montadas
     this.onScroll();
     if (this.query) this.search(this.query);
   }
