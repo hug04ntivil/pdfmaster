@@ -20,7 +20,9 @@ export const OV = {
 };
 
 const doc = () => S.cur;
-const scale = () => OV.viewer.scale;
+// quitar un nodo puede fallar si otro manejador (p. ej. 'blur' del editor) ya lo movió: no es un error
+const rm = (n) => { try { n.remove(); } catch { /* ya se quitó durante un blur */ } };
+const scale =() => OV.viewer.scale;
 const cssFamily = (f) => ({ Helvetica: 'Arial, Helvetica, sans-serif', Times: '"Times New Roman", Times, serif', Courier: '"Courier New", Courier, monospace' }[f] || `"${f}", Arial, sans-serif`);
 
 export function initOverlay(viewer) {
@@ -43,7 +45,7 @@ function mount(layer, i) {
 }
 
 OV.setTool = function (name) {
-  if (OV.tool === 'edittext' && name !== 'edittext') document.querySelectorAll('.ov-hover, .ov-tbox, .ov-tghost').forEach((n) => n.remove());
+  if (OV.tool === 'edittext' && name !== 'edittext') document.querySelectorAll('.ov-hover, .ov-tbox, .ov-tghost').forEach(rm);
   OV.tool = name;
   document.querySelectorAll('.ov-layer').forEach((l) => {
     l.classList.toggle('active', DRAW_TOOLS.has(name));
@@ -100,7 +102,7 @@ OV.remove = function (id, { noHistory = false } = {}) {
   if (!noHistory) d.checkpoint('Eliminar');
   const kill = [id, o.linked].filter(Boolean);
   d.overlays = d.overlays.filter((x) => !kill.includes(x.id));
-  kill.forEach((k) => document.querySelectorAll(`[data-id="${k}"]`).forEach((n) => n.remove()));
+  kill.forEach((k) => document.querySelectorAll(`[data-id="${k}"]`).forEach(rm));
   if (OV.selId && kill.includes(OV.selId)) OV.selId = null;
   emit('overlays');
   emit('selection');
@@ -140,20 +142,20 @@ OV.hasPending = () => !!(doc() && doc().overlays.length);
 // ---------------------------------------------------------------- dibujo
 OV.renderAll = function () {
   if (!OV.viewer) return;
-  document.querySelectorAll('.ov-tbox, .ov-tghost').forEach((n) => n.remove());
+  document.querySelectorAll('.ov-tbox, .ov-tghost').forEach(rm);
   OV.viewer.pages.forEach((_, i) => renderPageObjects(i));
 };
 function renderPageObjects(i) {
   const p = OV.viewer.pages[i];
   if (!p || !doc()) return;
-  p.ov.querySelectorAll('.ov, .ov-svg').forEach((n) => n.remove());
+  p.ov.querySelectorAll('.ov, .ov-svg').forEach(rm);
   doc().overlays.filter((o) => o.page === i).forEach((o) => p.ov.append(buildEl(o)));
   if (OV.selId) p.ov.querySelectorAll(`[data-id="${OV.selId}"]`).forEach((n) => n.classList.add('sel'));
 }
 function renderObject(o) {
   const p = OV.viewer.pages[o.page];
   if (!p) return;
-  p.ov.querySelectorAll(`[data-id="${o.id}"]`).forEach((n) => n.remove());
+  p.ov.querySelectorAll(`[data-id="${o.id}"]`).forEach(rm);
   p.ov.append(buildEl(o));
   if (OV.selId === o.id) p.ov.querySelectorAll(`[data-id="${o.id}"]`).forEach((n) => n.classList.add('sel'));
 }
@@ -305,7 +307,7 @@ function startEdit(o, el, { fresh = false } = {}) {
   if (!el) el = document.querySelector(`.ov-text[data-id="${o.id}"]`);
   if (!el) return;
   const rzEl = el.querySelector('.rz');
-  if (rzEl) rzEl.remove();
+  if (rzEl) rm(rzEl);
   el.contentEditable = 'plaintext-only';
   el.focus();
   const sel = getSelection();
@@ -499,7 +501,7 @@ async function renderTextBoxes(i) {
   const gen = (layer._tbGen = (layer._tbGen || 0) + 1);
   const pt = await OV.viewer.pageText(i);
   if (layer._tbGen !== gen || OV.tool !== 'edittext') return;
-  layer.querySelectorAll('.ov-tbox').forEach((n) => n.remove());
+  layer.querySelectorAll('.ov-tbox').forEach(rm);
   const list = [];
   const frag = document.createDocumentFragment();
   for (const m of pt.map) {
@@ -560,7 +562,7 @@ function startDragOrEdit(e, i, ent, box) {
     window.removeEventListener('pointerup', up);
     if (!dragging) { await beginTextEdit(i, ent.m, ent.r); return; }
     box.classList.remove('drag-src');
-    if (ghost) ghost.remove();
+    if (ghost) rm(ghost);
     const dx = (ev.clientX - start.x) / scale(), dy = (ev.clientY - start.y) / scale();
     if (Math.hypot(dx, dy) < 1) return;
     await moveTextItem(i, ent.m, ent.r, dx, dy);
@@ -621,7 +623,7 @@ function sampleBg(i, r) {
 
 async function beginTextEdit(i, m, r) {
   const d0 = doc();
-  document.querySelectorAll('.ov-hover').forEach((n) => n.remove());
+  document.querySelectorAll('.ov-hover').forEach(rm);
   // ¿ya hay una edición pendiente de este mismo texto? se continúa
   const prev = d0.overlays.find((x) => x.type === 'textedit' && x.page === i && Math.abs(x.ox - m.it.transform[4]) < 0.5 && Math.abs(x.oy - m.it.transform[5]) < 0.5);
   if (prev) { OV.select(prev.id); startEdit(prev, null, { fresh: false }); return; }

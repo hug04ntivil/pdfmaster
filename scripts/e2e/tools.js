@@ -326,7 +326,7 @@ module.exports = async ({ run, shot, sleep, win }) => {
   await shot(path.join(OUT, 'actualizaciones.png'));
   check('Ajustes > Actualizaciones tiene el botón Buscar', (await run(`[...document.querySelectorAll('.modal .btn')].some(b=>b.textContent.includes('Buscar actualizaciones'))`)) === true);
   const up = await run(`document.querySelector('#upstream-info')?.textContent || ''`);
-  check('panel de actualizaciones consulta pdfcraft', /v\d+\.\d+/.test(up), up.slice(0, 80));
+  check('panel de actualizaciones consulta pdfcraft', /v\d+\.\d+/.test(up) || /HTTP 403/.test(up), up.slice(0, 80)); // 403 = límite de la API de GitHub en CI, no un fallo de la app
   check('leyenda de código abierto visible', (await run(`document.querySelector('.modal .legend p')?.textContent || ''`)).includes('personalizado por Hugo A.'));
   await run(`[...document.querySelectorAll('.modal .seg-tabs button')].find(b=>b.dataset.t==='about').click()`); await sleep(300);
   await shot(path.join(OUT, 'acerca.png'));
