@@ -303,17 +303,67 @@ function onObjDown(e, o, el) {
 function estimateWidth(o) { return o.size * 0.55 * Math.max(...String(o.text).split('\n').map((l) => l.length), 1); }
 
 // ---------------------------------------------------------------- edición de texto
-function startEdit(o, el, { fresh = false } = {}) {
+/** Pone el cursor donde se hizo clic (o al final): se puede avanzar letra a letra sin seleccionar todo. */
+function placeCaret(el, at) {
+  let range = null;
+  try {
+    if (at && document.caretPositionFromPoint) {
+      const c = document.caretPositionFromPoint(at.x, at.y);
+      if (c && el.contains(c.offsetNode)) { range = document.createRange(); range.setStart(c.offsetNode, c.offset); }
+    } else if (at && document.caretRangeFromPoint) {
+      const c = document.caretRangeFromPoint(at.x, at.y);
+      if (c && el.contains(c.startContainer)) range = c;
+    }
+  } catch { /* sin posición exacta */ }
+  if (!range) { range = document.createRange(); range.selectNodeContents(el); range.collapse(false); }
+  range.collapse(true);
+  const sel = getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+/** Asa para mover la línea que se está editando sin salir de la edición (el cuadro de texto solo mueve el cursor). */
+function addGrip(o, el) {
+  const layer = el.parentElement;
+  const grip = h('div', { class: 'ov-grip', title: 'Arrastrar para mover el texto' }, '✥');
+  const place = () => Object.assign(grip.style, { left: `${el.offsetLeft - 24}px`, top: `${el.offsetTop + el.offsetHeight / 2 - 11}px` });
+  place();
+  layer.append(grip);
+  grip.addEventListener('mousedown', (e) => e.preventDefault()); // evita que el cuadro pierda el foco
+  grip.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); // no se pierde el foco: la edición sigue activa
+    e.stopPropagation();
+    let last = pts(layer, e);
+    const move = (ev) => {
+      const cur = pts(layer, ev);
+      const dx = cur.x - last.x, dy = cur.y - last.y;
+      last = cur;
+      o.x += dx; o.y += dy;
+      o.moveX = (o.moveX || 0) + dx; o.moveY = (o.moveY || 0) - dy;
+      el.style.left = px(o.x - 1); el.style.top = px(o.y);
+      place();
+      doc().dirty = true;
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  });
+  return grip;
+}
+
+function startEdit(o, el, { fresh = false, at = null } = {}) {
   if (!el) el = document.querySelector(`.ov-text[data-id="${o.id}"]`);
   if (!el) return;
   const rzEl = el.querySelector('.rz');
   if (rzEl) rm(rzEl);
   el.contentEditable = 'plaintext-only';
   el.focus();
-  const sel = getSelection();
-  const r = document.createRange();
-  r.selectNodeContents(el);
-  if (!fresh) sel.removeAllRanges(), sel.addRange(r);
+  if (!fresh) {
+    if (at || o.type === 'textedit' || o.linked) placeCaret(el, at);
+    else { const r = document.createRange(); r.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+  }
+  const grip = o.type === 'textedit' ? addGrip(o, el) : null;
   let checkpointed = fresh || o.type === 'textedit';
   el.addEventListener('input', () => {
     if (!checkpointed) { doc().checkpoint('Editar texto'); checkpointed = true; }
@@ -325,10 +375,11 @@ function startEdit(o, el, { fresh = false } = {}) {
     el.removeEventListener('blur', finish);
     el.contentEditable = 'false';
     o.text = el.textContent;
+    if (grip) rm(grip);
     if (o.type === 'textedit') {
       const d = doc();
       setTimeout(() => { try { OV.remove(o.id, { noHistory: true }); } catch { /* ya no está */ } }, 0);
-      if (o.text === o.str) return;
+      if (o.text === o.str && !o.moveX && !o.moveY) return;
       OV.pending = withBusy('Aplicando el cambio…', async () => {
         const r = await d.editTextNow(o);
         if (!r.ok) {
@@ -493,7 +544,31 @@ async function itemAt(i, p) {
   }
   return best;
 }
-/** Dibuja una caja sobre cada texto de la página: clic = editar, arrastrar = mover, × = borrar. */
+/** Une los fragmentos de texto que están en la misma línea (palabras o trozos sueltos) en una sola caja. */
+function groupLines(ents) {
+  const groups = [];
+  for (const e of [...ents].sort((a, b) => a.r.x - b.r.x)) {
+    const cy = e.r.y + e.r.h / 2;
+    let best = null;
+    for (const g of groups) {
+      const h0 = Math.max(g.h, e.r.h);
+      const gap = e.r.x - g.right;
+      if (Math.abs(cy - g.cy) < Math.min(g.h, e.r.h) * 0.4 && gap < h0 * 1.0 && gap > -h0 * 0.5 && (!best || gap < e.r.x - best.right)) best = g;
+    }
+    if (best) {
+      best.items.push(e);
+      best.right = Math.max(best.right, e.r.x + e.r.w);
+      best.top = Math.min(best.top, e.r.y);
+      best.bottom = Math.max(best.bottom, e.r.y + e.r.h);
+      best.cy = (best.top + best.bottom) / 2;
+      best.h = best.bottom - best.top;
+    } else groups.push({ items: [e], left: e.r.x, right: e.r.x + e.r.w, top: e.r.y, bottom: e.r.y + e.r.h, cy, h: e.r.h });
+  }
+  return groups.map((g) => ({ items: g.items, m: g.items[0].m, r: { x: g.left, y: g.top, w: g.right - g.left, h: g.bottom - g.top } }))
+    .sort((a, b) => a.r.y - b.r.y || a.r.x - b.r.x);
+}
+
+/** Dibuja una caja sobre cada línea de texto de la página: clic = editar, arrastrar = mover la línea entera, × = borrar. */
 async function renderTextBoxes(i) {
   const pg = OV.viewer.pages[i];
   if (!pg || !doc()) return;
@@ -502,17 +577,20 @@ async function renderTextBoxes(i) {
   const pt = await OV.viewer.pageText(i);
   if (layer._tbGen !== gen || OV.tool !== 'edittext') return;
   layer.querySelectorAll('.ov-tbox').forEach(rm);
-  const list = [];
-  const frag = document.createDocumentFragment();
+  const ents = [];
   for (const m of pt.map) {
     if (!m.it.str.trim()) continue;
     const r = OV.viewer.rectsFor(pt, m.start, m.end)[0];
-    if (!r) continue;
-    const k = list.push({ m, r }) - 1;
-    const b = h('div', { class: 'ov-tbox', 'data-k': k }, h('span', { class: 'x', title: 'Borrar este texto' }, '×'));
+    if (r) ents.push({ m, r });
+  }
+  const list = groupLines(ents);
+  const frag = document.createDocumentFragment();
+  list.forEach((g, k) => {
+    const r = g.r;
+    const b = h('div', { class: 'ov-tbox', 'data-k': k }, h('span', { class: 'x', title: g.items.length > 1 ? 'Borrar esta línea' : 'Borrar este texto' }, '×'));
     Object.assign(b.style, { left: px(r.x - 1), top: px(r.y - 1), width: px(r.w + 2), height: px(r.h + 2) });
     frag.append(b);
-  }
+  });
   layer._tb = list;
   layer.prepend(frag);
 }
@@ -533,17 +611,25 @@ async function onEditToolDown(e, layer, i) {
     if (ae.isContentEditable) ae.dispatchEvent(new FocusEvent('blur')); // por si la ventana no tiene el foco del sistema
     await OV.settle();
     const hit = await itemAt(i, p0);
-    if (hit && !onX) await beginTextEdit(i, hit.m, hit.r);
+    if (hit && !onX) await beginTextEdit(i, hit.m, hit.r, { x: e.clientX, y: e.clientY });
     return;
   }
   if (!ent) return;
   e.preventDefault();
-  if (onX) { await deleteTextItem(i, ent.m, ent.r); return; }
+  if (onX) { await changeTextGroup(i, ent.items, { clear: true, busy: 'Borrando el texto…', done: 'Texto borrado (Ctrl+Z para deshacer)' }); return; }
   startDragOrEdit(e, i, ent, box);
+}
+
+/** Fragmento de la línea que está bajo el puntero (o el más cercano). */
+function itemUnder(g, p) {
+  const inside = g.items.find((it) => p.x >= it.r.x - 1 && p.x <= it.r.x + it.r.w + 1);
+  if (inside) return inside;
+  return g.items.reduce((a, b) => (Math.abs(p.x - (b.r.x + b.r.w / 2)) < Math.abs(p.x - (a.r.x + a.r.w / 2)) ? b : a));
 }
 
 function startDragOrEdit(e, i, ent, box) {
   const start = { x: e.clientX, y: e.clientY };
+  const layer = box.parentElement;
   let dragging = false;
   let ghost = null;
   const move = (ev) => {
@@ -551,21 +637,25 @@ function startDragOrEdit(e, i, ent, box) {
     if (!dragging && Math.hypot(dx, dy) > 5) {
       dragging = true;
       box.classList.add('drag-src');
-      ghost = h('div', { class: 'ov-tghost' }, ent.m.it.str);
+      ghost = h('div', { class: 'ov-tghost' }, ent.items.map((x) => x.m.it.str).join(' '));
       Object.assign(ghost.style, { left: px(ent.r.x - 1), top: px(ent.r.y - 1), minWidth: px(ent.r.w + 2), height: px(ent.r.h + 2), lineHeight: px(ent.r.h + 2), fontSize: px(ent.r.h * 0.8) });
-      box.parentElement.append(ghost);
+      layer.append(ghost);
     }
     if (dragging) ghost.style.transform = `translate(${dx}px, ${dy}px)`;
   };
   const up = async (ev) => {
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
-    if (!dragging) { await beginTextEdit(i, ent.m, ent.r); return; }
+    if (!dragging) {
+      const it = itemUnder(ent, pts(layer, ev));
+      await beginTextEdit(i, it.m, it.r, { x: ev.clientX, y: ev.clientY });
+      return;
+    }
     box.classList.remove('drag-src');
     if (ghost) rm(ghost);
     const dx = (ev.clientX - start.x) / scale(), dy = (ev.clientY - start.y) / scale();
     if (Math.hypot(dx, dy) < 1) return;
-    await moveTextItem(i, ent.m, ent.r, dx, dy);
+    await changeTextGroup(i, ent.items, { dx, dy, busy: 'Moviendo el texto…' });
   };
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
@@ -605,8 +695,26 @@ function fallbackText(i, m, r, text, dx, dy, probe) {
   emit('overlays');
 }
 
-const deleteTextItem = (i, m, r) => changeTextItem(i, m, r, { text: '', busy: 'Borrando el texto…', done: 'Texto borrado (Ctrl+Z para deshacer)' });
-const moveTextItem = (i, m, r, dx, dy) => changeTextItem(i, m, r, { dx, dy, busy: 'Moviendo el texto…' });
+/** Mueve o borra todos los fragmentos de una línea de una sola vez (un único cambio en el PDF). */
+async function changeTextGroup(i, ents, { clear = false, dx = 0, dy = 0, busy, done = '' }) {
+  if (ents.length === 1) return changeTextItem(i, ents[0].m, ents[0].r, { text: clear ? '' : ents[0].m.it.str, dx, dy, busy, done });
+  const d0 = doc();
+  const edits = ents.map(({ m }) => ({ page: i, ox: m.it.transform[4], oy: m.it.transform[5], str: m.it.str, text: clear ? '' : m.it.str, moveX: dx, moveY: -dy }));
+  OV.pending = withBusy(busy, async () => {
+    let results = [];
+    if (OV.viewer.pages[i].proxy.rotate === 0) {
+      try {
+        const out = await d0.applyTextEdits(d0.bytes, edits);
+        results = out.results;
+        if (results.some((r) => r.ok && !r.unchanged)) await d0.applyBytes(out.bytes, clear ? 'Borrar texto' : 'Mover texto');
+      } catch (err) { console.warn(err); }
+    }
+    const failed = ents.filter((_, k) => !(results[k] && results[k].ok));
+    failed.forEach(({ m, r }) => fallbackText(i, m, r, clear ? '' : m.it.str, dx, dy, null));
+    if (!failed.length && done) toast(done, 'ok', 3500);
+  });
+  await OV.pending;
+}
 
 function sampleBg(i, r) {
   let bg = '#ffffff';
@@ -621,12 +729,12 @@ function sampleBg(i, r) {
   return bg;
 }
 
-async function beginTextEdit(i, m, r) {
+async function beginTextEdit(i, m, r, at = null) {
   const d0 = doc();
   document.querySelectorAll('.ov-hover').forEach(rm);
   // ¿ya hay una edición pendiente de este mismo texto? se continúa
   const prev = d0.overlays.find((x) => x.type === 'textedit' && x.page === i && Math.abs(x.ox - m.it.transform[4]) < 0.5 && Math.abs(x.oy - m.it.transform[5]) < 0.5);
-  if (prev) { OV.select(prev.id); startEdit(prev, null, { fresh: false }); return; }
+  if (prev) { OV.select(prev.id); startEdit(prev, null, { fresh: false, at }); return; }
 
   // 1) edición fiel: se reescribe el propio texto del PDF con su fuente incrustada
   let probe = null;
@@ -643,7 +751,7 @@ async function beginTextEdit(i, m, r) {
     d0.overlays.push(o);
     renderObject(o);
     OV.select(o.id);
-    startEdit(o, null, { fresh: false });
+    startEdit(o, null, { fresh: false, at });
     emit('overlays');
     return;
   }
@@ -664,7 +772,7 @@ async function beginTextEdit(i, m, r) {
   renderObject(cover);
   renderObject(o);
   OV.select(o.id);
-  startEdit(o, null, { fresh: false });
+  startEdit(o, null, { fresh: false, at });
   toast('Esta fuente no se puede editar de forma exacta: se usará una equivalente.', '', 5000);
   emit('overlays');
 }

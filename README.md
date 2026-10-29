@@ -76,9 +76,9 @@ Diferencias con Windows:
 
 **Editar texto existente** reescribe el propio texto del PDF en lugar de taparlo con un recuadro:
 
-1. Pulsa **Editar texto existente**: todos los textos de la página se marcan con una caja.
-2. **Clic** en un texto para editarlo (se reconoce su fuente incrustada: Calibri, Arial, Times, Georgia…). El panel derecho dice qué letras ya tiene la fuente.
-3. **Arrastra** la caja para mover el texto; la **×** de la caja lo borra.
+1. Pulsa **Editar texto existente**: cada línea de texto de la página se marca con una caja (los fragmentos de una misma línea forman una sola caja).
+2. **Clic** en un texto para editarlo: el cursor queda donde hiciste clic y te mueves letra a letra con el teclado (se reconoce su fuente incrustada: Calibri, Arial, Times, Georgia…). El panel derecho dice qué letras ya tiene la fuente.
+3. **Arrastra** la caja para mover la línea completa; la **×** de la caja la borra. Mientras editas, el asa ✥ junto al texto lo mueve sin salir de la edición.
 4. **Clic fuera** (o *Enter*) aplica el cambio al instante y ves el resultado real. *Esc* cancela y *Ctrl+Z* deshace.
 
 - Las letras que la fuente original trae se dibujan **con esa misma fuente**, en el mismo tamaño y color.

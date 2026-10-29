@@ -339,4 +339,6 @@ body.mac #titlebar { padding-left: 84px; padding-right: 14px; }
 .ov-tbox .x { display: none; position: absolute; top: -10px; right: -10px; width: 20px; height: 20px; line-height: 18px; text-align: center; border-radius: 50%; background: var(--accent); color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); }
 .ov-tbox:hover .x { display: block; }
 .ov-tbox .x:hover { background: var(--accent-2); transform: scale(1.12); }
+.ov-grip { position: absolute; z-index: 7; width: 22px; height: 22px; line-height: 22px; text-align: center; border-radius: 6px; background: var(--accent); color: #fff; font-size: 14px; cursor: move; user-select: none; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35); pointer-events: auto; }
+.ov-grip:hover { background: var(--accent-2); }
 .ov-tghost { position: absolute; pointer-events: none; z-index: 6; padding: 0 1px; white-space: pre; background: color-mix(in srgb, var(--accent) 18%, white); color: #111; border: 1.5px solid var(--accent); border-radius: 3px; font-family: Arimo, Arial, sans-serif; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3); opacity: 0.92; }

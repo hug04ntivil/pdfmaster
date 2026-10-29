@@ -225,7 +225,7 @@ export class PdfDoc {
     if (!this.overlays.length) return;
     let list = this.overlays;
     let base = this.bytes;
-    const tedits = list.filter((o) => o.type === 'textedit' && o.text !== o.str);
+    const tedits = list.filter((o) => o.type === 'textedit' && (o.text !== o.str || o.moveX || o.moveY));
     list = list.filter((o) => o.type !== 'textedit');
     const notes = [];
     if (tedits.length) {

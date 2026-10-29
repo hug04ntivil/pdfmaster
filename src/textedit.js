@@ -716,12 +716,17 @@ export async function moveText(pdfDoc, pageIndex, edit, ctx) {
       if (o.op === 'Tj' || o.op === 'TJ' || o.op === "'" || o.op === '"' || o.op === 'ET' || o.op === 'BT') break;
       if (o.op === 'Tm' || o.op === 'Td' || o.op === 'TD' || o.op === 'T*') { posOp = o; break; }
     }
+    // Tm: e,f están en el espacio de usuario (solo cuenta la matriz de transformación de la página, con su posible inversión del eje Y);
+    // Td/TD: el desplazamiento está en el espacio del texto (cuenta también la escala de Tm)
     const sx = (S.tm[0] * S.ctm[0]) || 1, sy = (S.tm[3] * S.ctm[3]) || 1;
-    const dxt = (edit.moveX || 0) / sx, dyt = (edit.moveY || 0) / sy;
     if (posOp && posOp.op === 'Tm' && posOp.args.length >= 6) {
-      patches.push({ s: posOp.args[4].s, e: posOp.args[4].e, text: fmt(posOp.args[4].v + dxt) });
-      patches.push({ s: posOp.args[5].s, e: posOp.args[5].e, text: fmt(posOp.args[5].v + dyt) });
-    } else if (idx === 0 && posOp && (posOp.op === 'Td' || posOp.op === 'TD') && posOp.args.length >= 2) {
+      const dxm = (edit.moveX || 0) / (S.ctm[0] || 1), dym = (edit.moveY || 0) / (S.ctm[3] || 1);
+      patches.push({ s: posOp.args[4].s, e: posOp.args[4].e, text: fmt(posOp.args[4].v + dxm) });
+      patches.push({ s: posOp.args[5].s, e: posOp.args[5].e, text: fmt(posOp.args[5].v + dym) });
+      continue;
+    }
+    const dxt = (edit.moveX || 0) / sx, dyt = (edit.moveY || 0) / sy;
+    if (idx === 0 && posOp && (posOp.op === 'Td' || posOp.op === 'TD') && posOp.args.length >= 2) {
       patches.push({ s: posOp.args[0].s, e: posOp.args[0].e, text: fmt(posOp.args[0].v + dxt) });
       patches.push({ s: posOp.args[1].s, e: posOp.args[1].e, text: fmt(posOp.args[1].v + dyt) });
       relative = { dxt, dyt };

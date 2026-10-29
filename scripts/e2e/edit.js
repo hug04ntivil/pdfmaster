@@ -18,8 +18,17 @@ module.exports = async ({ run, shot, sleep, win }) => {
   const lineOf = (key) => run(`(async()=>{ const d=window.__pm.S.cur; const pg=await d.pdf.getPage(1); const tc=await pg.getTextContent(); const seed=tc.items.find(i=>i.str.trim() && i.str.includes(${JSON.stringify(key)})); if(!seed) return ''; const row=tc.items.filter(i=>Math.abs(i.transform[5]-seed.transform[5])<1.5).sort((a,b)=>a.transform[4]-b.transform[4]); return row.map(i=>i.str).join('').trim(); })()`);
   const fontOf = (key) => run(`(async()=>{ const d=window.__pm.S.cur; const pg=await d.pdf.getPage(1); const tc=await pg.getTextContent(); await pg.getOperatorList(); const seed=tc.items.find(i=>i.str.trim() && i.str.includes(${JSON.stringify(key)})); if(!seed) return ''; try { return pg.commonObjs.get(seed.fontName).name; } catch(e) { return 'sin datos'; } })()`);
   const waitBoxes = async () => { for (let i = 0; i < 80; i++) { if (await run(`document.querySelectorAll('.ov-tbox').length > 0`)) return true; await sleep(150); } return false; };
-  const boxOf = (key) => `(()=>{ const layer=document.querySelector('.ov-layer'); const k=layer._tb.findIndex(e=>e.m.it.str.includes(${JSON.stringify(key)})); return layer.querySelector('.ov-tbox[data-k="'+k+'"]'); })()`;
-  const clickItem = async (key) => { await waitBoxes(); return run(`(()=>{ const box=${boxOf(key)}; const b=box.getBoundingClientRect(); const x=b.left+Math.min(b.width/2,30), y=b.top+b.height/2; box.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:x,clientY:y,button:0,pointerId:1})); window.dispatchEvent(new PointerEvent('pointerup',{clientX:x,clientY:y,button:0,pointerId:1})); return 1; })()`); };
+  const boxOf = (key) => `(()=>{ const layer=[...document.querySelectorAll('.ov-layer')].find(l=>l._tb && l._tb.length); if(!layer) return null; const k=layer._tb.findIndex(e=>e.items.some(x=>x.m.it.str.includes(${JSON.stringify(key)}))); return layer.querySelector('.ov-tbox[data-k="'+k+'"]'); })()`;
+  const clickOnce = (key) => run(`(()=>{ const box=${boxOf(key)}; if(!box) return 0; const b=box.getBoundingClientRect(); const x=b.left+Math.min(b.width/2,30), y=b.top+b.height/2; box.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:x,clientY:y,button:0,pointerId:1})); window.dispatchEvent(new PointerEvent('pointerup',{clientX:x,clientY:y,button:0,pointerId:1})); return 1; })()`);
+  // si el visor reconstruye las cajas justo entre buscar y hacer clic, el clic cae en una caja vieja: se reintenta
+  const clickItem = async (key) => {
+    for (let t = 0; t < 4; t++) {
+      await waitBoxes();
+      await clickOnce(key);
+      for (let i = 0; i < 25; i++) { if (await run(`!!document.querySelector('.ov-textedit[contenteditable]') || window.__pm.S.cur.overlays.some(o=>o.type==='text' && o.linked)`)) return 1; await sleep(100); }
+    }
+    return 0;
+  };
   const dragItem = async (key, dx, dy) => { await waitBoxes(); return run(`(async()=>{ const box=${boxOf(key)}; const b=box.getBoundingClientRect(); const x=b.left+10, y=b.top+b.height/2; const ev=(t,px,py,tg)=>(tg||window).dispatchEvent(new PointerEvent(t,{bubbles:true,clientX:px,clientY:py,button:0,pointerId:1})); ev('pointerdown',x,y,box); for (let s=1;s<=6;s++) { ev('pointermove',x+${dx}*s/6,y+${dy}*s/6); await new Promise(r=>setTimeout(r,20)); } ev('pointerup',x+${dx},y+${dy}); return 1; })()`); };
   const deleteItem = async (key) => { await waitBoxes(); return run(`(()=>{ const box=${boxOf(key)}; const x=box.querySelector('.x'); const b=x.getBoundingClientRect(); x.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:b.left+5,clientY:b.top+5,button:0,pointerId:1})); return 1; })()`); };
   const clickOutside = () => run(`(()=>{ const l=document.querySelector('.ov-layer'); const b=l.getBoundingClientRect(); l.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:b.left+b.width*0.8,clientY:b.top+b.height*0.85,button:0,pointerId:1})); return 1; })()`);
@@ -48,11 +57,16 @@ module.exports = async ({ run, shot, sleep, win }) => {
   // 1) letras que ya existen en la fuente: se conserva exactamente
   await clickItem('Monto total');
   console.log('     (análisis del texto: ' + (await waitEditor()) + ' ms)');
+  const caret = JSON.parse(await run(`(()=>{ const el=document.querySelector('.ov-textedit[contenteditable]'); const s=getSelection(); return JSON.stringify({collapsed:s.isCollapsed, inside: !!el && el.contains(s.anchorNode), len: el ? el.textContent.length : 0, grip: !!document.querySelector('.ov-grip')}); })()`));
+  check('clic en el texto pone el cursor (no selecciona todo) y muestra el asa de mover', caret.collapsed && caret.inside && caret.grip, JSON.stringify(caret));
   const ov1 = JSON.parse(await run(`JSON.stringify(window.__pm.S.cur.overlays.map(o=>({t:o.type,f:o.fontBase,loaded:!!o.loaded,size:o.size&&Math.round(o.size*10)/10})))`));
   check('clic en texto → edición fiel (reconoce la fuente incrustada)', ov1.length === 1 && ov1[0].t === 'textedit' && /Calibri/.test(ov1[0].f), JSON.stringify(ov1));
+  // si la ventana de pruebas pierde el foco del sistema, el editor puede cerrarse solo antes de escribir: se reabre
+  if (!(await run(`!!document.querySelector('.ov-textedit[contenteditable]')`))) { console.log('     (el editor se cerró solo; se reabre)'); await settle(); await run(`window.__pm.OV.setTool('edittext')`); await clickItem('Monto total'); await waitEditor(); }
   await typeOnly('Monto neto: $1.299.000 más IVA. Vigencia 30 días.');
-  await sleep(300);
+  await sleep(150);
   const hint = await run(`document.querySelector('#props')?.innerText || ''`);
+  if (!/Fuente original/.test(hint)) console.log('     (depuración) ' + await run(`JSON.stringify({sel: window.__pm.OV.selId, tool: window.__pm.OV.tool, ov: window.__pm.S.cur.overlays.map(o=>o.type+':'+o.id), editor: !!document.querySelector('.ov-textedit[contenteditable]'), active: document.activeElement && document.activeElement.className, toasts: [...document.querySelectorAll('.toast')].map(x=>x.textContent)})`));
   check('el panel indica la fuente original y los caracteres que faltan', /Fuente original/.test(hint) && /Calibri/.test(hint) && /9/.test(hint), hint.replace(/\s+/g, ' ').slice(0, 160));
   await shot(path.join(OUT, '1-edicion.png'));
   await finishEdit();
@@ -126,6 +140,35 @@ module.exports = async ({ run, shot, sleep, win }) => {
   const l4 = await lineOf('Presupuesto');
   check('Chromium: texto nuevo presente', l4.includes('9876'), l4);
   await shot(path.join(OUT, '3-chromium.png'));
+
+  // 4b) una línea formada por varios fragmentos (negrita, cursiva...): la caja es la línea completa y se mueve entera
+  const html2 = '<html><body style="font:18px Georgia,serif;margin:40px"><p>Palabra <b>negrita</b> <i>cursiva</i> final.</p></body></html>';
+  await run(`(async()=>{ const bytes = await window.pm.htmlToPdf({html:${JSON.stringify(html2)}, pageSize:'A4', margin:10}); await window.__pm.openEntry({name:'lineas.pdf', path:null, data:bytes}); return 1; })()`);
+  await sleep(1500); await waitPaint();
+  await run(`window.__pm.OV.setTool('edittext')`);
+  await waitBoxes();
+  const grp = JSON.parse(await run(`JSON.stringify((document.querySelector('.ov-layer')._tb||[]).map(e=>e.items.length))`));
+  check('los fragmentos de una misma línea forman una sola caja', grp.length === 1 && grp[0] >= 2, JSON.stringify(grp));
+  const a0 = await itemPos('Palabra'), b0 = await itemPos('final');
+  ver = await run('window.__pm.S.cur.version');
+  await dragItem('Palabra', 70, 0);
+  await waitVersion(ver);
+  const a1 = await itemPos('Palabra'), b1 = await itemPos('final');
+  const sc2 = await run('window.__pm.viewer.scale');
+  check('arrastrar la caja mueve la línea completa (todos sus fragmentos)', Math.abs((a1.x - a0.x) - 70 / sc2) < 0.6 && Math.abs((b1.x - b0.x) - 70 / sc2) < 0.6, `Δ primero=${(a1.x - a0.x).toFixed(1)}, Δ último=${(b1.x - b0.x).toFixed(1)}, esperado ${(70 / sc2).toFixed(1)}`);
+
+  // 4c) asa de mover mientras se edita: el cuadro de edición se desplaza y al salir se aplica
+  await run(`window.__pm.OV.setTool('edittext')`);
+  await waitBoxes();
+  await clickItem('Palabra');
+  await waitEditor();
+  const c0 = await itemPos('Palabra');
+  ver = await run('window.__pm.S.cur.version');
+  await run(`(async()=>{ const g=document.querySelector('.ov-grip'); const b=g.getBoundingClientRect(); const x=b.left+8,y=b.top+8; const ev=(t,px,py,tg)=>(tg||window).dispatchEvent(new PointerEvent(t,{bubbles:true,clientX:px,clientY:py,button:0,pointerId:1})); ev('pointerdown',x,y,g); for (let s=1;s<=4;s++) { ev('pointermove',x,y+60*s/4); await new Promise(r=>setTimeout(r,20)); } ev('pointerup',x,y+60); return 1; })()`);
+  console.log('     (asa) ' + await run(`JSON.stringify(window.__pm.S.cur.overlays.filter(o=>o.type==='textedit').map(o=>({x:o.x,y:o.y,moveX:o.moveX,moveY:o.moveY})))`));
+  await finishEdit();
+  const c1 = await itemPos('Palabra');
+  check('el asa mueve el texto mientras se edita', Math.abs((c1.y - c0.y) + 60 / sc2) < 0.8, `Δy=${(c1.y - c0.y).toFixed(1)} (esperado ${(-60 / sc2).toFixed(1)})`);
 
   // 5) PDF generado por LibreOffice (fuentes TrueType simples con codificación propia): solo donde está instalado
   const so = process.platform === 'darwin' ? '/Applications/LibreOffice.app/Contents/MacOS/soffice' : '';
