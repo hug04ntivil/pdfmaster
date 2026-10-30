@@ -329,6 +329,19 @@ function addGrip(o, el) {
   const place = () => Object.assign(grip.style, { left: `${el.offsetLeft - 24}px`, top: `${el.offsetTop + el.offsetHeight / 2 - 11}px` });
   place();
   layer.append(grip);
+  // el resto de la línea (los otros fragmentos) viaja con el texto editado: se muestra con copias fantasma y se mueve en el PDF al aplicar
+  const ghosts = [];
+  let tx = 0, ty = 0;
+  grip._cleanup = () => { ghosts.forEach(rm); ghosts.length = 0; };
+  const showMates = () => {
+    if (ghosts.length || !o.mates || !o.mates.length) return;
+    for (const mt of o.mates) {
+      const g = h('div', { class: 'ov-tghost' }, mt.str);
+      Object.assign(g.style, { left: px(mt.x - 1), top: px(mt.y - 1), minWidth: px(mt.w + 2), height: px(mt.h + 2), lineHeight: px(mt.h + 2), fontSize: px(mt.h * 0.8) });
+      layer.append(g);
+      ghosts.push(g);
+    }
+  };
   grip.addEventListener('mousedown', (e) => e.preventDefault()); // evita que el cuadro pierda el foco
   grip.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
@@ -343,6 +356,9 @@ function addGrip(o, el) {
       o.moveX = (o.moveX || 0) + dx; o.moveY = (o.moveY || 0) - dy;
       el.style.left = px(o.x - 1); el.style.top = px(o.y);
       place();
+      showMates();
+      tx += dx; ty += dy;
+      ghosts.forEach((g) => { g.style.transform = `translate(${tx * scale()}px, ${ty * scale()}px)`; });
       doc().dirty = true;
     };
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
@@ -375,13 +391,14 @@ function startEdit(o, el, { fresh = false, at = null } = {}) {
     el.removeEventListener('blur', finish);
     el.contentEditable = 'false';
     o.text = el.textContent;
-    if (grip) rm(grip);
+    if (grip) { grip._cleanup(); rm(grip); }
     if (o.type === 'textedit') {
       const d = doc();
       setTimeout(() => { try { OV.remove(o.id, { noHistory: true }); } catch { /* ya no está */ } }, 0);
       if (o.text === o.str && !o.moveX && !o.moveY) return;
       OV.pending = withBusy('Aplicando el cambio…', async () => {
         const r = await d.editTextNow(o);
+        if (r.matesFailed) toast('Una parte de la línea no se pudo mover junto con el resto.', '', 5000);
         if (!r.ok) {
           d.checkpoint('Editar texto');
           for (const x of d.fallbackOverlays(o)) { d.overlays.push(x); renderObject(x); }
@@ -736,6 +753,11 @@ async function beginTextEdit(i, m, r, at = null) {
   const prev = d0.overlays.find((x) => x.type === 'textedit' && x.page === i && Math.abs(x.ox - m.it.transform[4]) < 0.5 && Math.abs(x.oy - m.it.transform[5]) < 0.5);
   if (prev) { OV.select(prev.id); startEdit(prev, null, { fresh: false, at }); return; }
 
+  // otros fragmentos de la misma línea: se mueven junto con este cuando se arrastra el asa
+  const same = (a, b) => a.str === b.str && Math.abs(a.transform[4] - b.transform[4]) < 0.01 && Math.abs(a.transform[5] - b.transform[5]) < 0.01;
+  const grp = (OV.viewer.pages[i].ov._tb || []).find((g) => g.items.some((x) => same(x.m.it, m.it)));
+  const mates = grp ? grp.items.filter((x) => !same(x.m.it, m.it)).map((x) => ({ ox: x.m.it.transform[4], oy: x.m.it.transform[5], str: x.m.it.str, x: x.r.x, y: x.r.y, w: x.r.w, h: x.r.h })) : [];
+
   // 1) edición fiel: se reescribe el propio texto del PDF con su fuente incrustada
   let probe = null;
   if (OV.viewer.pages[i].proxy.rotate === 0) {
@@ -744,7 +766,7 @@ async function beginTextEdit(i, m, r, at = null) {
   const bg = sampleBg(i, r);
   if (probe && probe.ok) {
     const o = {
-      id: uid(), type: 'textedit', page: i, x: r.x, y: r.y, w: r.w, h: r.h, ox: m.it.transform[4], oy: m.it.transform[5], str: m.it.str, text: m.it.str,
+      id: uid(), type: 'textedit', page: i, x: r.x, y: r.y, w: r.w, h: r.h, ox: m.it.transform[4], oy: m.it.transform[5], str: m.it.str, text: m.it.str, mates,
       size: probe.size, color: probe.color, cover: bg, loaded: probe.loaded, fontBase: probe.fontBase, avail: probe.avail,
       sysFamily: probe.sysFamily, bundledFamily: probe.bundledFamily, bold: probe.bold, italic: probe.italic,
     };

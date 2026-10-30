@@ -164,15 +164,16 @@ module.exports = async ({ run, shot, sleep, win }) => {
   // 4c) asa de mover mientras se edita: el cuadro de edición se desplaza y al salir se aplica
   await run(`window.__pm.OV.setTool('edittext')`);
   await waitBoxes();
-  await clickItem('Palabra');
+  await clickItem('negrita'); // un fragmento del medio de la línea: el asa debe mover la línea completa
   await waitEditor();
-  const c0 = await itemPos('Palabra');
+  const c0 = await itemPos('Palabra'), e0 = await itemPos('final'), n0 = await itemPos('negrita');
   ver = await run('window.__pm.S.cur.version');
   await run(`(async()=>{ const g=document.querySelector('.ov-grip'); const b=g.getBoundingClientRect(); const x=b.left+8,y=b.top+8; const ev=(t,px,py,tg)=>(tg||window).dispatchEvent(new PointerEvent(t,{bubbles:true,clientX:px,clientY:py,button:0,pointerId:1})); ev('pointerdown',x,y,g); for (let s=1;s<=4;s++) { ev('pointermove',x,y+60*s/4); await new Promise(r=>setTimeout(r,20)); } ev('pointerup',x,y+60); return 1; })()`);
   console.log('     (asa) ' + await run(`JSON.stringify(window.__pm.S.cur.overlays.filter(o=>o.type==='textedit').map(o=>({x:o.x,y:o.y,moveX:o.moveX,moveY:o.moveY})))`));
   await finishEdit();
-  const c1 = await itemPos('Palabra');
-  check('el asa mueve el texto mientras se edita', Math.abs((c1.y - c0.y) + 60 / sc2) < 0.8, `Δy=${(c1.y - c0.y).toFixed(1)} (esperado ${(-60 / sc2).toFixed(1)})`);
+  const c1 = await itemPos('Palabra'), e1 = await itemPos('final'), n1 = await itemPos('negrita');
+  const want = -60 / sc2;
+  check('el asa mueve la línea completa mientras se edita (todos los fragmentos)', [[c0, c1], [n0, n1], [e0, e1]].every(([a, b]) => Math.abs((b.y - a.y) - want) < 0.8), `Δy primero=${(c1.y - c0.y).toFixed(1)}, medio=${(n1.y - n0.y).toFixed(1)}, último=${(e1.y - e0.y).toFixed(1)} (esperado ${want.toFixed(1)})`);
 
   // 5) PDF generado por LibreOffice (fuentes TrueType simples con codificación propia): solo donde está instalado
   const so = process.platform === 'darwin' ? '/Applications/LibreOffice.app/Contents/MacOS/soffice' : '';

@@ -204,9 +204,12 @@ export class PdfDoc {
 
   /** Edita ahora mismo un texto del PDF (se ve el resultado real) con punto de restauración. */
   async editTextNow(o) {
-    const { bytes, results } = await this.applyTextEdits(this.bytes, [o]);
+    // el resto de la línea (o.mates) se mueve junto con el texto editado si se arrastró el asa
+    const mates = (o.moveX || o.moveY) ? (o.mates || []).map((mt) => ({ page: o.page, ox: mt.ox, oy: mt.oy, str: mt.str, text: mt.str, moveX: o.moveX, moveY: o.moveY })) : [];
+    const { bytes, results } = await this.applyTextEdits(this.bytes, [o, ...mates]);
     const r = results[0];
-    if (r.ok && !r.unchanged) await this.applyBytes(bytes, 'Editar texto');
+    if (results.some((x) => x.ok && !x.unchanged)) await this.applyBytes(bytes, 'Editar texto');
+    r.matesFailed = results.slice(1).filter((x) => !x.ok).length;
     return r;
   }
 
