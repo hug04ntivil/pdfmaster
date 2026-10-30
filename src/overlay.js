@@ -30,6 +30,9 @@ export function initOverlay(viewer) {
   viewer.hooks.onMountPage = (el, i, layer) => mount(layer, i);
   viewer.hooks.onZoom = () => OV.renderAll();
   viewer.hooks.onPageRendered = (i) => { if (OV.tool === 'edittext') renderTextBoxes(i); };
+  viewer.hooks.onBuilt = () => { if (OV.tool === 'edittext') showTextBoxes(); };
+  // el dibujo de una página pesada ocupa el hilo principal: las cajas de texto se calculan antes de empezar a dibujarla
+  viewer.hooks.beforeRender = (i) => (OV.tool === 'edittext' ? renderTextBoxes(i) : null);
   document.addEventListener('mouseup', onSelectionMouseUp);
   document.addEventListener('pointerdown', (e) => {
     if (!e.target.closest('.ov') && !e.target.closest('#right') && !e.target.closest('#modal-root') && OV.selId) {
@@ -45,7 +48,10 @@ function mount(layer, i) {
 }
 
 OV.setTool = function (name) {
-  if (OV.tool === 'edittext' && name !== 'edittext') document.querySelectorAll('.ov-hover, .ov-tbox, .ov-tghost').forEach(rm);
+  if (OV.tool === 'edittext' && name !== 'edittext') {
+    document.querySelectorAll('.ov-hover, .ov-tbox, .ov-tghost').forEach(rm);
+    document.querySelectorAll('.ov-layer').forEach((l) => { l._tbKey = null; });
+  }
   OV.tool = name;
   document.querySelectorAll('.ov-layer').forEach((l) => {
     l.classList.toggle('active', DRAW_TOOLS.has(name));
@@ -55,7 +61,7 @@ OV.setTool = function (name) {
   });
   document.querySelectorAll('.textLayer').forEach((t) => t.classList.toggle('edit-mode', name === 'edittext'));
   if (name !== 'select' && name) OV.select(null);
-  if (name === 'edittext' && OV.viewer) OV.viewer.pages.forEach((p, i) => { if (p.rendered) renderTextBoxes(i); });
+  if (name === 'edittext' && OV.viewer) showTextBoxes();
   emit('tool');
 };
 
@@ -143,7 +149,9 @@ OV.hasPending = () => !!(doc() && doc().overlays.length);
 OV.renderAll = function () {
   if (!OV.viewer) return;
   document.querySelectorAll('.ov-tbox, .ov-tghost').forEach(rm);
+  document.querySelectorAll('.ov-layer').forEach((l) => { l._tbKey = null; });
   OV.viewer.pages.forEach((_, i) => renderPageObjects(i));
+  if (OV.tool === 'edittext') showTextBoxes(); // tras un cambio de zoom las cajas se recolocan sin esperar al dibujo
 };
 function renderPageObjects(i) {
   const p = OV.viewer.pages[i];
@@ -561,6 +569,18 @@ async function itemAt(i, p) {
   }
   return best;
 }
+/** Dibuja las cajas de las páginas visibles de inmediato (no depende de que el lienzo esté pintado) y deja listo el análisis de fuentes. */
+function showTextBoxes() {
+  const v = OV.viewer;
+  const d = doc();
+  if (!v || !d || !v.pages.length) return;
+  const idx = v.visibleIndexes();
+  // el primer clic no espera: la fuente y los anchos de la página se cargan cuando las cajas ya se ven (esa carga es pesada y no debe retrasarlas)
+  Promise.all(idx.map((i) => renderTextBoxes(i))).then(() => {
+    if (idx.length && d.prewarmText) setTimeout(() => { if (doc() === d && OV.tool === 'edittext') d.prewarmText(idx[0]).catch(() => {}); }, 50);
+  });
+}
+
 /** Une los fragmentos de texto que están en la misma línea (palabras o trozos sueltos) en una sola caja. */
 function groupLines(ents) {
   const groups = [];
@@ -586,13 +606,24 @@ function groupLines(ents) {
 }
 
 /** Dibuja una caja sobre cada línea de texto de la página: clic = editar, arrastrar = mover la línea entera, × = borrar. */
-async function renderTextBoxes(i) {
+function renderTextBoxes(i) {
   const pg = OV.viewer.pages[i];
-  if (!pg || !doc()) return;
+  if (!pg || !doc()) return Promise.resolve();
   const layer = pg.ov;
+  const key = `${doc().version}:${scale()}`;
+  if (layer._tbKey === key && layer.querySelector('.ov-tbox')) return Promise.resolve(); // ya están dibujadas para esta versión y zoom
+  if (layer._tbBusy && layer._tbBusyKey === key) return layer._tbBusy; // ya se están calculando
+  layer._tbBusyKey = key;
+  const run = drawTextBoxes(i, layer, key);
+  layer._tbBusy = run;
+  run.finally(() => { if (layer._tbBusy === run) layer._tbBusy = null; }).catch(() => {});
+  return run;
+}
+async function drawTextBoxes(i, layer, key) {
   const gen = (layer._tbGen = (layer._tbGen || 0) + 1);
   const pt = await OV.viewer.pageText(i);
-  if (layer._tbGen !== gen || OV.tool !== 'edittext') return;
+  if (layer._tbGen !== gen || OV.tool !== 'edittext' || !layer.isConnected) return;
+  layer._tbKey = key;
   layer.querySelectorAll('.ov-tbox').forEach(rm);
   const ents = [];
   for (const m of pt.map) {

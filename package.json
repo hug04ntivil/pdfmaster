@@ -1,7 +1,7 @@
 {
   "name": "pdf-master",
   "productName": "PDF Master",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "PDF Master - editor y suite completa de herramientas PDF para Windows y macOS",
   "main": "main.js",
   "author": "Hugo Antivil <hugo.antivil@pertec.cl>",

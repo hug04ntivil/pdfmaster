@@ -73,6 +73,7 @@ export class Viewer {
     this.pages.forEach((p) => this.io.observe(p.el));
     this.scroll.scrollTop = top;
     this.builtVersion = doc.version; // versión del documento cuyas páginas ya están montadas
+    if (this.hooks.onBuilt) this.hooks.onBuilt(); // la capa de edición no espera al dibujo de las páginas
     this.onScroll();
     if (this.query) this.search(this.query);
   }
@@ -157,6 +158,8 @@ export class Viewer {
     p.rendered = true;
     const gen = this.gen;
     const scale = this.scale;
+    if (this.hooks.beforeRender) { try { await this.hooks.beforeRender(i); } catch { /* sin cajas de texto */ } }
+    if (gen !== this.gen || scale !== this.scale) return; // el visor se reconstruyó o cambió el zoom: otra llamada se encarga
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     let k = scale * dpr;
     const px = p.w * p.h * k * k;

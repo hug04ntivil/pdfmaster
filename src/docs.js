@@ -183,12 +183,28 @@ export class PdfDoc {
     emit('bytes');
   }
 
-  /** Incrusta en el PDF las anotaciones pendientes (texto, firmas, formas...). */
-  /** ¿Se puede editar este texto conservando su fuente? (se guarda en caché por versión del documento) */
+  /** Carga con antelación lo que necesita probeText (el PDF para el motor y los anchos de las fuentes de la página); se guarda por versión del documento. */
+  async prewarmText(pageIndex) {
+    const v = this.version;
+    if (!this._pl || this._plVersion !== v) {
+      if (!this._plLoading || this._plLoadingVersion !== v) {
+        this._plLoadingVersion = v;
+        this._plLoading = E.loadDoc(this.bytes).then((pl) => { if (this.version === v) { this._pl = pl; this._plVersion = v; this._plWidths = {}; } return pl; });
+      }
+      await this._plLoading;
+    }
+    if (this._plVersion !== v) return null; // el documento cambió mientras se cargaba
+    const widths = this._plWidths;
+    if (!widths[pageIndex]) { widths[pageIndex] = pdfjsFontWidths(this.pdf, pageIndex); widths[pageIndex].catch(() => { delete widths[pageIndex]; }); }
+    return widths[pageIndex];
+  }
+
+  /** ¿Se puede editar este texto conservando su fuente? */
   async probeText(pageIndex, item) {
-    if (!this._pl || this._plVersion !== this.version) { this._pl = await E.loadDoc(this.bytes); this._plVersion = this.version; this._plWidths = {}; }
-    if (!this._plWidths[pageIndex]) this._plWidths[pageIndex] = await pdfjsFontWidths(this.pdf, pageIndex);
-    const fonts = this._plWidths[pageIndex];
+    let fonts = await this.prewarmText(pageIndex);
+    if (!fonts) fonts = await this.prewarmText(pageIndex); // una vez más si el documento cambió justo antes
+    if (!fonts) throw new Error('el documento cambió');
+    fonts = await fonts;
     const r = TE.probeItem(this._pl, pageIndex, item, { widthOf: widthFn(fonts) });
     if (r.ok) { const f = Object.values(fonts).find((x) => x.loaded === item.fontName); r.loaded = f ? f.loaded : item.fontName; }
     return r;
