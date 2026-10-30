@@ -707,15 +707,19 @@ export async function moveText(pdfDoc, pageIndex, edit, ctx) {
   if (win.some((s) => !s.upright)) return { ok: false, reason: 'texto girado' };
   const fmt = (v) => String(Math.round(v * 10000) / 10000);
   const patches = [];
-  let relative = null; // posición relativa (Td) del primer tramo: hay que compensar para no mover las líneas siguientes
   for (let idx = 0; idx < win.length; idx++) {
     const S = win[idx];
-    let posOp = null;
+    // posOp: la última orden de posición antes de este tramo; absolute: antes del tramo hay un Tm o un BT (la posición no depende del tramo anterior)
+    let posOp = null, absolute = false;
     for (let q = S.k - 1; q >= 0; q--) {
       const o = ops[q];
-      if (o.op === 'Tj' || o.op === 'TJ' || o.op === "'" || o.op === '"' || o.op === 'ET' || o.op === 'BT') break;
-      if (o.op === 'Tm' || o.op === 'Td' || o.op === 'TD' || o.op === 'T*') { posOp = o; break; }
+      if (o.op === 'Tj' || o.op === 'TJ' || o.op === "'" || o.op === '"' || o.op === 'ET') break;
+      if (o.op === 'BT') { absolute = true; break; }
+      if (o.op === 'Tm') { absolute = true; if (!posOp) posOp = o; break; }
+      if (!posOp && (o.op === 'Td' || o.op === 'TD' || o.op === 'T*')) posOp = o;
     }
+    // un tramo que sigue al anterior (sin Tm ni BT en medio) se mueve solo con él; si no, hay que moverlo también (p. ej. un Tm y un Td por cada letra)
+    if (idx > 0 && !absolute) continue;
     // Tm: e,f están en el espacio de usuario (solo cuenta la matriz de transformación de la página, con su posible inversión del eje Y);
     // Td/TD: el desplazamiento está en el espacio del texto (cuenta también la escala de Tm)
     const sx = (S.tm[0] * S.ctm[0]) || 1, sy = (S.tm[3] * S.ctm[3]) || 1;
@@ -723,18 +727,24 @@ export async function moveText(pdfDoc, pageIndex, edit, ctx) {
       const dxm = (edit.moveX || 0) / (S.ctm[0] || 1), dym = (edit.moveY || 0) / (S.ctm[3] || 1);
       patches.push({ s: posOp.args[4].s, e: posOp.args[4].e, text: fmt(posOp.args[4].v + dxm) });
       patches.push({ s: posOp.args[5].s, e: posOp.args[5].e, text: fmt(posOp.args[5].v + dym) });
-      continue;
-    }
-    const dxt = (edit.moveX || 0) / sx, dyt = (edit.moveY || 0) / sy;
-    if (idx === 0 && posOp && (posOp.op === 'Td' || posOp.op === 'TD') && posOp.args.length >= 2) {
+    } else if (posOp && (posOp.op === 'Td' || posOp.op === 'TD') && posOp.args.length >= 2) {
+      const dxt = (edit.moveX || 0) / sx, dyt = (edit.moveY || 0) / sy;
       patches.push({ s: posOp.args[0].s, e: posOp.args[0].e, text: fmt(posOp.args[0].v + dxt) });
       patches.push({ s: posOp.args[1].s, e: posOp.args[1].e, text: fmt(posOp.args[1].v + dyt) });
-      relative = { dxt, dyt };
-    } else if (idx === 0) return { ok: false, reason: 'este texto no se puede mover' };
+    } else return { ok: false, reason: 'este texto no se puede mover' };
   }
-  if (relative) { // deshace el desplazamiento para que lo siguiente (posiciones relativas) quede donde estaba
-    const last = win[win.length - 1].op;
-    patches.push({ s: last.e, e: last.e, text: `\n${fmt(-relative.dxt)} ${fmt(-relative.dyt)} Td` });
+  { // si lo que viene detrás se posiciona respecto a esta línea (Td, T*, ' o "), se deshace el desplazamiento para que quede donde estaba
+    const L = win[win.length - 1];
+    let relativeNext = false;
+    for (let q = L.k + 1; q < ops.length; q++) {
+      const o = ops[q].op;
+      if (o === 'Td' || o === 'TD' || o === 'T*' || o === "'" || o === '"') { relativeNext = true; break; }
+      if (o === 'Tm' || o === 'BT' || o === 'ET' || o === 'Tj' || o === 'TJ') break;
+    }
+    if (relativeNext) {
+      const dxt = (edit.moveX || 0) / ((L.tm[0] * L.ctm[0]) || 1), dyt = (edit.moveY || 0) / ((L.tm[3] * L.ctm[3]) || 1);
+      patches.push({ s: L.op.e, e: L.op.e, text: `\n${fmt(-dxt)} ${fmt(-dyt)} Td` });
+    }
   }
   patches.sort((a, b) => b.s - a.s);
   let buf = bytes;

@@ -153,6 +153,45 @@ console.log('Mover y borrar texto');
   ok(res[0].ok && l && Math.abs(l.y - (item.y + 20)) < 0.1, 'editar y mover a la vez', JSON.stringify(res[0]) + ' ' + (l ? l.y.toFixed(1) : '-'));
 }
 
+console.log('Mover texto con distintas estructuras de contenido');
+{
+  const { PDFName } = await import('@cantoo/pdf-lib');
+  const build = async (content) => {
+    const d = await PDFDocument.create();
+    const f = await d.embedFont(StandardFonts.Helvetica);
+    const page = d.addPage([400, 300]);
+    const fname = page.node.newFontDictionary('F1', f.ref).asString();
+    page.node.set(PDFName.of('Contents'), d.context.register(d.context.flateStream(content.replaceAll('/F1', fname))));
+    return d.save();
+  };
+  const moveItem = async (bytes, str, moveX, moveY) => {
+    const info = await pdfjsInfo(bytes);
+    const item = info.items.find((i) => i.str.includes(str));
+    const doc = await E.loadDoc(bytes);
+    const r = await T.moveText(doc, 0, { x: item.x, y: item.y, str: item.str, moveX, moveY }, mkctx(info.fonts));
+    return { r, info, item, after: await pdfjsInfo(await E.saveDoc(doc)) };
+  };
+  const stays = (info, after, skip) => info.items.filter((i) => !i.str.includes(skip)).every((i) => after.items.some((a) => a.str === i.str && Math.abs(a.x - i.x) < 0.1 && Math.abs(a.y - i.y) < 0.1));
+  // una palabra partida en tramos, cada uno con su Tm y su Td absolutos (así lo escriben Qt y wkhtmltopdf): se mueve entera, no solo la primera letra
+  {
+    const bytes = await build('BT /F1 12 Tf 1 0 0 1 0 0 Tm 100 200 Td (L) Tj 1 0 0 1 0 0 Tm 106.67 200 Td (as Condes) Tj 1 0 0 1 0 0 Tm 100 150 Td (Otra linea) Tj ET');
+    const { r, info, item, after } = await moveItem(bytes, 'Condes', 25, -15);
+    ok(r.ok, 'mover una palabra partida en tramos con Tm+Td absolutos', JSON.stringify(r));
+    const parts = after.items.filter((i) => /^(L|as Condes|Las Condes)$/.test(i.str));
+    ok(parts.length > 0 && parts.every((p) => Math.abs(p.y - (item.y - 15)) < 0.1), 'todos los tramos de la palabra bajan 15', parts.map((p) => p.str + '@' + p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' | '));
+    ok(Math.abs(Math.min(...parts.map((p) => p.x)) - (item.x + 25)) < 0.1, 'y se corren 25 a la derecha', String(Math.min(...parts.map((p) => p.x))));
+    ok(stays(info, after, 'Condes') && after.items.some((i) => i.str === 'Otra linea' && Math.abs(i.y - 150) < 0.1), 'la otra línea no se mueve');
+  }
+  // posiciones relativas encadenadas (Td tras Td): se mueve solo el texto elegido
+  {
+    const bytes = await build('BT /F1 12 Tf 50 250 Td (Primero) Tj 0 -20 Td (Segundo) Tj 0 -20 Td (Tercero) Tj ET');
+    const { r, info, item, after } = await moveItem(bytes, 'Segundo', 10, -5);
+    const seg = after.items.find((i) => i.str.includes('Segundo'));
+    ok(r.ok && seg && Math.abs(seg.x - (item.x + 10)) < 0.1 && Math.abs(seg.y - (item.y - 5)) < 0.1, 'mover un texto con posiciones relativas encadenadas', JSON.stringify(r));
+    ok(stays(info, after, 'Segundo'), 'los textos anterior y siguiente no se mueven');
+  }
+}
+
 console.log('PDF creado con fuentes estándar (Helvetica sin incrustar)');
 {
   const d = await PDFDocument.create();
