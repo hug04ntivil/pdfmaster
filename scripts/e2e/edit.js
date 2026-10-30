@@ -53,6 +53,10 @@ module.exports = async ({ run, shot, sleep, win }) => {
   await waitPaint();
   await run(`window.__pm.OV.setTool('edittext')`);
   await sleep(300);
+  await run(`window.__pm.viewer.visibleIndexes().forEach((i) => window.__pm.viewer.renderPage(i))`); // con la ventana tapada el visor no recibe avisos de visibilidad
+  if (!(await waitBoxes())) {
+    console.log('     (depuración, sin cajas) ' + await run(`(async()=>{ const v=window.__pm.viewer; const pt=await v.pageText(0); const rects=pt.map.filter(m=>m.it.str.trim()).map(m=>v.rectsFor(pt,m.start,m.end)[0]); return JSON.stringify({tool:window.__pm.OV.tool, pages:v.pages.length, rendered:v.pages.map(p=>p.rendered), map:pt.map.length, rects:rects.filter(Boolean).length, tb:[...document.querySelectorAll('.ov-layer')].map(l=>l._tb?l._tb.length:null), hidden:document.hidden, vis:document.visibilityState}); })()`));
+  }
 
   // 1) letras que ya existen en la fuente: se conserva exactamente
   await clickItem('Monto total');
