@@ -1,6 +1,6 @@
 // Conversiones (PDF -> imágenes/texto/Word/Excel/PowerPoint/HTML), OCR, impresión y utilidades de imagen
 import { createWorker } from 'tesseract.js';
-import { Document, Packer, Paragraph, TextRun, ImageRun, PageOrientation } from 'docx';
+import { Document, Packer, Paragraph, TextRun, ImageRun, PageOrientation, FrameAnchorType, HorizontalPositionRelativeFrom, VerticalPositionRelativeFrom, LineRuleType } from 'docx';
 import ExcelJS from 'exceljs';
 import PptxGenJS from 'pptxgenjs';
 import { pdfjs } from './docs.js';
@@ -40,7 +40,8 @@ export async function pageRows(proxy) {
   for (const it of tc.items) {
     if (!it.str) continue;
     const t = pdfjs.Util.transform(vp.transform, it.transform);
-    items.push({ str: it.str, x: t[4], y: t[5], w: it.width, h: Math.hypot(t[2], t[3]) || it.height || 10 });
+    const h = Math.hypot(t[2], t[3]) || it.height || 10;
+    items.push({ str: it.str, x: t[4], y: t[5], w: it.width, h, rx: it.transform[4], ry: it.transform[5], rotated: Math.abs(t[1]) > h * 0.02 || Math.abs(t[2]) > h * 0.02 });
   }
   items.sort((a, b) => a.y - b.y || a.x - b.x);
   const rows = [];
@@ -121,9 +122,72 @@ export async function toHtml(doc, idxs, { images = false }, progress) {
 }
 const median = (a) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
 
+// ---------------------------------------------------------------- diseño fiel (texto editable en su posición exacta)
+const TEXT_OPS = () => new Set([pdfjs.OPS.showText, pdfjs.OPS.showSpacedText, pdfjs.OPS.nextLineShowText, pdfjs.OPS.nextLineSetSpacingShowText]);
+
+/** Dibuja la página sin su texto (fondo: imágenes, líneas, colores); el texto se pone aparte, editable. */
+export async function renderPageNoText(pdf, pageNo, scale) {
+  const page = await pdf.getPage(pageNo);
+  const vp = page.getViewport({ scale });
+  const cv = document.createElement('canvas');
+  cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
+  const ctx = cv.getContext('2d', { alpha: false });
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+  const text = TEXT_OPS();
+  await page.render({ canvasContext: ctx, viewport: vp, operationsFilter: (i, ol) => !text.has(ol.fnArray[i]) }).promise;
+  return { canvas: cv, w: vp.width / scale, h: vp.height / scale };
+}
+
+/**
+ * Los textos de la página tal como están: cada tramo de una misma línea con su fuente, tamaño y color reales.
+ * Devuelve segmentos (una línea, o una columna de una línea) con su posición en puntos, y si la página tiene texto girado.
+ */
+/** Las líneas de la página con la fuente, tamaño y color reales de cada fragmento (it.st; null si no se pudo leer). */
+async function styledRows(doc, pageIdx) {
+  const pr = await pageRows(await doc.pdf.getPage(pageIdx + 1));
+  const flat = pr.rows.flatMap((r) => r.items);
+  let styles = flat.map(() => null);
+  if (doc.textStyles) styles = await doc.textStyles(pageIdx, flat.map((it) => ({ x: it.rx, y: it.ry, str: it.str })));
+  flat.forEach((it, k) => { it.st = styles[k]; });
+  return { ...pr, flat };
+}
+const styleOf = (it) => ({ size: (it.st && it.st.size) || it.h, family: (it.st && it.st.family) || 'Arial', color: ((it.st && it.st.color) || '#000000').replace('#', ''), bold: !!(it.st && it.st.bold), italic: !!(it.st && it.st.italic) });
+
+export async function faithfulLayout(doc, pageIdx) {
+  const { rows, w, h, flat } = await styledRows(doc, pageIdx);
+  const rotated = flat.some((it) => it.rotated || (it.st && it.st.upright === false));
+  const segs = [];
+  for (const r of rows) {
+    let cur = null;
+    for (const it of r.items) {
+      if (!it.str.trim()) continue;
+      const st = styleOf(it);
+      const size = st.size;
+      const gap = cur ? it.x - cur.right : 0;
+      if (!cur || gap > Math.max(it.h, cur.h) * 1.3 || gap < -it.h) {
+        cur = { x: it.x, y: it.y, h: it.h, size, right: it.x + it.w, runs: [] };
+        segs.push(cur);
+      } else if (gap > size * 0.12 && !/\s$/.test(cur.runs[cur.runs.length - 1].text) && !/^\s/.test(it.str)) {
+        cur.runs[cur.runs.length - 1].text += ' '.repeat(Math.max(1, Math.round(gap / (size * 0.27))));
+      }
+      cur.runs.push({ text: it.str, ...st });
+      cur.right = Math.max(cur.right, it.x + it.w);
+      cur.h = Math.max(cur.h, it.h);
+      cur.size = Math.max(cur.size, size);
+    }
+  }
+  for (const sg of segs) { const last = sg.runs[sg.runs.length - 1]; last.text = last.text.replace(/\s+$/, ''); }
+  return { segs, rotated, w, h };
+}
+
 // ---------------------------------------------------------------- Word
-export async function toDocx(doc, idxs, { mode = 'text' }, progress) {
+// Posición del texto dentro de su marco de Word: distancia entre el borde superior de la línea y la línea base, y alto de línea (múltiplos del tamaño de letra)
+export const WORD_BASELINE = 0.97;
+export const WORD_LINE = 1.2;
+
+export async function toDocx(doc, idxs, { mode = 'faithful' } = {}, progress) {
   const sections = [];
+  let asImage = 0;
   for (let k = 0; k < idxs.length; k++) {
     const proxy = await doc.pdf.getPage(idxs[k] + 1);
     const vp = proxy.getViewport({ scale: 1 });
@@ -131,11 +195,36 @@ export async function toDocx(doc, idxs, { mode = 'text' }, progress) {
     const size = { width: Math.round(Math.min(vp.width, vp.height) * 20), height: Math.round(Math.max(vp.width, vp.height) * 20), orientation: portrait ? PageOrientation.PORTRAIT : PageOrientation.LANDSCAPE };
     let children = [];
     let margin = 720;
-    if (mode === 'image') {
+    let lay = null;
+    if (mode === 'faithful') lay = await faithfulLayout(doc, idxs[k]);
+    if (mode === 'image' || (lay && (lay.rotated || !lay.segs.length))) {
+      if (mode !== 'image') asImage++;
       const { canvas } = await renderPage(doc.pdf, idxs[k] + 1, 2);
       const data = await blobToBytes(await canvasToBlob(canvas, 'image/png'));
       margin = 0;
       children = [new Paragraph({ spacing: { before: 0, after: 0 }, children: [new ImageRun({ type: 'png', data, transformation: { width: Math.floor(vp.width * (96 / 72) * 0.985), height: Math.floor(vp.height * (96 / 72) * 0.97) } })] })];
+    } else if (mode === 'faithful') {
+      // fondo (imágenes, líneas y colores) detrás; cada línea de texto es un marco de Word en su posición exacta, con su fuente, tamaño y color
+      const { canvas } = await renderPageNoText(doc.pdf, idxs[k] + 1, 2.5);
+      const data = await blobToBytes(await canvasToBlob(canvas, 'image/png'));
+      margin = 0;
+      const tiny = { size: 2, font: 'Arial' };
+      children.push(new Paragraph({
+        spacing: { before: 0, after: 0, line: 20, lineRule: LineRuleType.EXACT },
+        children: [new ImageRun({
+          type: 'png', data, transformation: { width: Math.round(vp.width * (96 / 72)), height: Math.round(vp.height * (96 / 72)) },
+          floating: { horizontalPosition: { relative: HorizontalPositionRelativeFrom.PAGE, offset: 0 }, verticalPosition: { relative: VerticalPositionRelativeFrom.PAGE, offset: 0 }, behindDocument: true, allowOverlap: true, lockAnchor: true },
+        })],
+      }));
+      for (const sg of lay.segs) {
+        const lineH = Math.round(sg.size * WORD_LINE * 20);
+        children.push(new Paragraph({
+          frame: { type: 'absolute', position: { x: Math.round(sg.x * 20), y: Math.max(0, Math.round((sg.y - sg.size * WORD_BASELINE) * 20)) }, anchor: { horizontal: FrameAnchorType.PAGE, vertical: FrameAnchorType.PAGE } },
+          spacing: { before: 0, after: 0, line: lineH, lineRule: LineRuleType.EXACT },
+          children: sg.runs.map((r) => new TextRun({ text: r.text, font: r.family, size: Math.max(2, Math.round(r.size * 2)), color: r.color, bold: r.bold, italics: r.italic })),
+        }));
+      }
+      children.push(new Paragraph({ spacing: { before: 0, after: 0, line: 20, lineRule: LineRuleType.EXACT }, children: [new TextRun({ text: '', ...tiny })] }));
     } else {
       const { rows, w } = await pageRows(proxy);
       const med = median(rows.map((r) => r.h)) || 11;
@@ -147,32 +236,48 @@ export async function toDocx(doc, idxs, { mode = 'text' }, progress) {
       }));
       if (!children.length) children = [new Paragraph('')];
     }
-    sections.push({ properties: { page: { size, margin: { top: margin, bottom: margin, left: margin, right: margin } } }, children });
+    sections.push({ properties: { page: { size, margin: { top: margin, bottom: margin, left: margin, right: margin, header: 0, footer: 0 } } }, children });
     progress && progress((k + 1) / idxs.length);
   }
   const d = new Document({ creator: 'PDF Master', title: baseName(doc.name), sections });
-  return new Uint8Array(await Packer.toArrayBuffer(d));
+  const out = new Uint8Array(await Packer.toArrayBuffer(d));
+  if (asImage) out.note = `${asImage} página(s) con texto girado se dejaron como imagen`;
+  return out;
 }
 
 // ---------------------------------------------------------------- Excel
-export async function toXlsx(doc, idxs, progress) {
+export async function toXlsx(doc, idxs, { mode = 'faithful' } = {}, progress) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'PDF Master';
+  const faithful = mode === 'faithful';
   for (let k = 0; k < idxs.length; k++) {
     const proxy = await doc.pdf.getPage(idxs[k] + 1);
-    const { rows } = await pageRows(proxy);
+    const pageW = proxy.getViewport({ scale: 1 }).width;
+    const pageH = proxy.getViewport({ scale: 1 }).height;
+    const { rows } = faithful ? await styledRows(doc, idxs[k]) : await pageRows(proxy);
     const ws = wb.addWorksheet(`Página ${idxs[k] + 1}`.slice(0, 31));
-    // columnas: agrupa posiciones x de inicio de cada fragmento
+    // color de fondo de la página dibujada sin texto (así un texto blanco sobre fondo de color sigue viéndose y las tablas conservan su sombreado)
+    const bgCtx = faithful ? (await renderPageNoText(doc.pdf, idxs[k] + 1, 1)).canvas.getContext('2d') : null;
+    const bgAt = (x, y) => {
+      try {
+        const d = bgCtx.getImageData(Math.max(0, Math.min(bgCtx.canvas.width - 1, Math.round(x))), Math.max(0, Math.min(bgCtx.canvas.height - 1, Math.round(y))), 1, 1).data;
+        return d[0] + d[1] + d[2] > 3 * 245 ? null : [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+      } catch { return null; }
+    };
+    // columnas: agrupa posiciones x de inicio de cada fragmento (en modo fiel, una columna por cada posición distinta para conservar la posición exacta)
     const xs = [];
     rows.forEach((r) => r.items.forEach((it) => xs.push(it.x)));
     xs.sort((a, b) => a - b);
     const cols = [];
+    const colIdx = new Map();
     for (const x of xs) {
       const c = cols[cols.length - 1];
-      if (!c || x - c.max > 9) cols.push({ min: x, max: x });
+      if (!c || (faithful ? x - c.min > 4 : x - c.max > 9)) cols.push({ min: x, max: x });
       else c.max = x;
+      colIdx.set(x, cols.length - 1);
     }
-    const colOf = (x) => { let best = 0; for (let c = 0; c < cols.length; c++) if (x >= cols[c].min - 9) best = c; return best; };
+    const colOf = faithful ? (x) => colIdx.get(x) : (x) => { let best = 0; for (let c = 0; c < cols.length; c++) if (x >= cols[c].min - 9) best = c; return best; };
+    let prevY = null;
     rows.forEach((r, ri) => {
       const cells = new Map();
       // une fragmentos que están muy pegados (palabras de una misma celda)
@@ -180,16 +285,56 @@ export async function toXlsx(doc, idxs, progress) {
       for (const it of r.items) {
         let c = colOf(it.x);
         if (prev && it.x - (prev.x + prev.w) < it.h * 0.9 && cells.has(prev.c)) {
-          cells.set(prev.c, cells.get(prev.c) + (it.str.startsWith(' ') ? '' : ' ') + it.str);
+          cells.get(prev.c).v += (it.str.startsWith(' ') ? '' : ' ') + it.str;
           c = prev.c;
-        } else cells.set(c, (cells.get(c) || '') + it.str);
+        } else if (cells.has(c)) cells.get(c).v += it.str;
+        else cells.set(c, { v: it.str, it });
         prev = { x: it.x, w: it.w, c };
       }
       const row = ws.getRow(ri + 1);
-      for (const [c, v] of cells) row.getCell(c + 1).value = parseNum(v.trim());
+      for (const [c, cell] of cells) {
+        const xc = row.getCell(c + 1);
+        xc.value = parseNum(cell.v.trim());
+        if (faithful) {
+          const st = styleOf(cell.it);
+          xc.font = { name: st.family, size: Math.max(6, Math.round(st.size * 2) / 2), bold: st.bold, italic: st.italic, color: { argb: 'FF' + st.color.toUpperCase() } };
+          xc.alignment = { vertical: 'bottom', horizontal: typeof xc.value === 'number' ? 'right' : 'left', wrapText: false };
+        }
+      }
+      if (faithful) {
+        // alto de fila = distancia entre líneas base: el espaciado vertical del PDF se conserva
+        row.height = Math.min(409, Math.max(6, prevY === null ? r.h * 1.3 : r.y - prevY));
+        prevY = r.y;
+      }
       row.commit();
     });
-    ws.columns.forEach((col) => { col.width = 18; });
+    if (faithful) {
+      // sombreado: color de fondo de cada celda (también las vacías) tomado de la página sin texto; solo donde el fondo es liso (no fotos ni logos)
+      const flat = (x0, x1, y) => {
+        const pts = [0.2, 0.5, 0.8].map((f) => bgAt(x0 + (x1 - x0) * f, y));
+        const rgb = (c) => [0, 2, 4].map((i) => parseInt(c.slice(i, i + 2), 16));
+        if (pts.some((c) => !c)) return null;
+        const base = rgb(pts[0]);
+        return pts.every((c) => rgb(c).every((v, i) => Math.abs(v - base[i]) <= 24)) ? pts[1] : null;
+      };
+      rows.forEach((r, ri) => {
+        let left = null;
+        cols.forEach((c, ci) => {
+          const span = (ci + 1 < cols.length ? cols[ci + 1].min : pageW - 20) - c.min;
+          // las columnas muy angostas (bordes) heredan el color de la anterior
+          const bg = span < 8 ? left : flat(c.min, c.min + Math.min(span, 60), r.y - r.h * 0.3);
+          left = bg;
+          if (bg) ws.getRow(ri + 1).getCell(ci + 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + bg } };
+        });
+      });
+      // ancho de cada columna = lo que ocupaba en la página
+      cols.forEach((c, ci) => {
+        const span = (ci + 1 < cols.length ? cols[ci + 1].min : pageW - 20) - c.min;
+        ws.getColumn(ci + 1).width = Math.min(120, Math.max(0.2, (span * (96 / 72) - 5) / 7));
+      });
+      ws.views = [{ showGridLines: false }];
+      ws.pageSetup = { orientation: pageW > pageH ? 'landscape' : 'portrait', paperSize: Math.abs(pageW - 612) < 20 ? 1 : 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+    } else ws.columns.forEach((col) => { col.width = 18; });
     progress && progress((k + 1) / idxs.length);
   }
   return new Uint8Array(await wb.xlsx.writeBuffer());
@@ -202,7 +347,10 @@ function parseNum(s) {
 }
 
 // ---------------------------------------------------------------- PowerPoint
-export async function toPptx(doc, idxs, progress) {
+// Posición del texto dentro de su cuadro en PowerPoint: distancia entre el borde superior y la línea base (múltiplo del tamaño de letra)
+export const PPT_BASELINE = 0.94;
+
+export async function toPptx(doc, idxs, { mode = 'faithful' } = {}, progress) {
   const pptx = new PptxGenJS();
   const first = await doc.pdf.getPage(idxs[0] + 1);
   const vp0 = first.getViewport({ scale: 1 });
@@ -210,16 +358,33 @@ export async function toPptx(doc, idxs, progress) {
   pptx.defineLayout({ name: 'PDFPAGE', width: W, height: H });
   pptx.layout = 'PDFPAGE';
   pptx.title = baseName(doc.name);
+  let asImage = 0;
   for (let k = 0; k < idxs.length; k++) {
-    const { canvas } = await renderPage(doc.pdf, idxs[k] + 1, 2);
     const slide = pptx.addSlide();
-    slide.addImage({ data: canvas.toDataURL('image/jpeg', 0.9), x: 0, y: 0, w: W, h: H });
+    const lay = mode === 'faithful' ? await faithfulLayout(doc, idxs[k]) : null;
+    if (lay && !lay.rotated && lay.segs.length) {
+      // fondo sin texto + un cuadro de texto editable por línea, en su posición exacta
+      const { canvas } = await renderPageNoText(doc.pdf, idxs[k] + 1, 2.5);
+      slide.addImage({ data: canvas.toDataURL('image/png'), x: 0, y: 0, w: W, h: H });
+      for (const sg of lay.segs) {
+        slide.addText(sg.runs.map((r) => ({ text: r.text, options: { fontFace: r.family, fontSize: Math.round(r.size * 100) / 100, color: r.color, bold: r.bold, italic: r.italic } })), {
+          x: sg.x / 72, y: (sg.y - sg.size * PPT_BASELINE) / 72, w: (sg.right - sg.x) / 72 * 1.12 + 0.2, h: sg.size * 1.25 / 72,
+          margin: 0, valign: 'top', align: 'left', wrap: false, fit: 'none', paraSpaceBefore: 0, paraSpaceAfter: 0,
+        });
+      }
+    } else {
+      if (lay) asImage++;
+      const { canvas } = await renderPage(doc.pdf, idxs[k] + 1, 2);
+      slide.addImage({ data: canvas.toDataURL('image/jpeg', 0.9), x: 0, y: 0, w: W, h: H });
+    }
     const { rows } = await pageRows(await doc.pdf.getPage(idxs[k] + 1));
     slide.addNotes(rows.map((r) => r.text).join('\n'));
     progress && progress((k + 1) / idxs.length);
   }
   const out = await pptx.write({ outputType: 'uint8array' });
-  return out instanceof Uint8Array ? out : new Uint8Array(out);
+  const res = out instanceof Uint8Array ? out : new Uint8Array(out);
+  if (asImage) res.note = `${asImage} diapositiva(s) con texto girado se dejaron como imagen`;
+  return res;
 }
 
 // ---------------------------------------------------------------- OCR

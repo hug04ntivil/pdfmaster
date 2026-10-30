@@ -14,6 +14,8 @@ miniaturas a la izquierda y **todas las herramientas a la derecha**.
 | **Numeración y marcas** | Numerar páginas · encabezado y pie · marca de agua (texto o imagen) |
 | **Formularios** | Rellenar campos · aplanar |
 | **Convertir** | PDF → imágenes (PNG/JPG) · Word · Excel · PowerPoint · texto · HTML · Imágenes → PDF · Texto/HTML → PDF · Word/Excel/PowerPoint → PDF (requiere Office instalado) |
+
+**Convertir a Word, Excel o PowerPoint** usa por defecto *Fiel al original*: cada línea de texto queda editable en su posición exacta, con su fuente, tamaño y color reales (Word: marcos de texto; PowerPoint: cuadros de texto; Excel: columnas, filas, fuentes y sombreado como en la página). Imágenes, líneas y colores van como fondo, sin el texto. Hay también *texto editable en párrafos* (Word), *solo datos* (Excel) e *imagen de página*. Comprobado con Word y PowerPoint reales: el texto queda a menos de 0,5 pt de su posición original (`scripts/e2e/convert-fiel.js`). Las páginas con texto girado se dejan como imagen.
 | **Optimizar** | Comprimir · **OCR** español/inglés (texto buscable en escaneos) |
 | **Seguridad y datos** | Proteger con contraseña (AES-256) · quitar contraseña · metadatos · propiedades |
 | **Visor** | Zoom, ajuste a ancho/página, búsqueda con resaltado, pestañas, deshacer/rehacer, imprimir, arrastrar y soltar |

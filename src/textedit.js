@@ -287,6 +287,7 @@ export function scanText(ops, fonts, widthOf, bytes) {
   let tm = [1, 0, 0, 1, 0, 0], tlm = [1, 0, 0, 1, 0, 0];
   let font = '', fs = 0, fsTok = '', fontOp = null, tc = 0, tw = 0, th = 1, tl = 0, rise = 0;
   let fill = '0 g';
+  let dfill = '0 g'; // color para mostrar (también entiende sc/scn con componentes numéricos); `fill` es el que se reescribe
   const shows = [];
   const nextLine = () => { tlm = mul([1, 0, 0, 1, 0, -tl], tlm); tm = tlm.slice(); };
   const decodeStr = (tok, fi) => {
@@ -302,8 +303,8 @@ export function scanText(ops, fonts, widthOf, bytes) {
     const o = ops[k];
     const a = o.args;
     switch (o.op) {
-      case 'q': stack.push({ ctm, font, fs, fsTok, fontOp, tc, tw, th, tl, rise, fill }); break;
-      case 'Q': { const s = stack.pop(); if (s) ({ ctm, font, fs, fsTok, fontOp, tc, tw, th, tl, rise, fill } = s); break; }
+      case 'q': stack.push({ ctm, font, fs, fsTok, fontOp, tc, tw, th, tl, rise, fill, dfill }); break;
+      case 'Q': { const s = stack.pop(); if (s) ({ ctm, font, fs, fsTok, fontOp, tc, tw, th, tl, rise, fill, dfill } = s); break; }
       case 'cm': if (a.length >= 6) ctm = mul(a.slice(0, 6).map(num), ctm); break;
       case 'BT': tm = [1, 0, 0, 1, 0, 0]; tlm = tm.slice(); break;
       case 'Tf': font = a[0] && a[0].v; fs = num(a[1]); fsTok = a[1] ? a[1].text : '12'; fontOp = o; break;
@@ -316,13 +317,14 @@ export function scanText(ops, fonts, widthOf, bytes) {
       case 'TD': tl = -num(a[1]); tlm = mul([1, 0, 0, 1, num(a[0]), num(a[1])], tlm); tm = tlm.slice(); break;
       case 'Tm': if (a.length >= 6) { tlm = a.slice(0, 6).map(num); tm = tlm.slice(); } break;
       case 'T*': nextLine(); break;
-      case 'g': case 'rg': case 'k': case 'G': case 'RG': case 'K': if (o.op === 'g' || o.op === 'rg' || o.op === 'k') fill = a.map((t) => t.text).join(' ') + ' ' + o.op; break;
+      case 'g': case 'rg': case 'k': case 'G': case 'RG': case 'K': if (o.op === 'g' || o.op === 'rg' || o.op === 'k') { fill = a.map((t) => t.text).join(' ') + ' ' + o.op; dfill = fill; } break;
+      case 'sc': case 'scn': if (a.length && a.every((t) => t.t === 'n') && [1, 3, 4].includes(a.length)) dfill = a.map((t) => t.text).join(' ') + ' ' + (a.length === 1 ? 'g' : a.length === 3 ? 'rg' : 'k'); break;
       case 'Tj': case 'TJ': case "'": case '"': {
         let strArgs = a;
         let prefix = '';
         if (o.op === "'") { nextLine(); prefix = 'T*'; } else if (o.op === '"') { tw = num(a[0]); tc = num(a[1]); nextLine(); strArgs = [a[2]]; prefix = `${a[0].text} Tw ${a[1].text} Tc T*`; }
         const fi = fonts.get(font);
-        const show = { op: o, k, kind: o.op, prefix, font, fi, fs, fsTok, fontOp, fill, tc, tw, th, ctm: ctm.slice(), tm: tm.slice(), elems: [], unsupported: !fi || !!fi.unsupported };
+        const show = { op: o, k, kind: o.op, prefix, font, fi, fs, fsTok, fontOp, fill, dfill, tc, tw, th, ctm: ctm.slice(), tm: tm.slice(), elems: [], unsupported: !fi || !!fi.unsupported };
         const trm0 = mul([fs * th, 0, 0, fs, 0, rise], mul(tm, ctm));
         show.origin = [trm0[4], trm0[5]];
         show.size = Math.hypot(trm0[2], trm0[3]);
@@ -798,6 +800,29 @@ export function probeItem(pdfDoc, pageIndex, item, ctx) {
     bold: style.bold, italic: style.italic, sysFamily: sys ? sys.family : '', bundledFamily: bundled ? bundled.family : 'Arimo',
     embedded: fi.embedded,
   };
+}
+
+/**
+ * Estilo real (familia, tamaño, color, negrita, cursiva) de cada texto de la página, para convertirlos a otros formatos.
+ * items: [{x, y, str}] en espacio de usuario del PDF; devuelve una lista paralela (null si no se pudo leer ese texto).
+ */
+export function itemStyles(pdfDoc, pageIndex, items, ctx) {
+  const leaf = pageLeaf(pdfDoc, pageIndex);
+  const bytes = readContents(pdfDoc, leaf);
+  if (!bytes) return items.map(() => null);
+  const shows = scanText(parseContent(bytes), loadPageFonts(pdfDoc, pageIndex), ctx.widthOf || (() => 500), bytes);
+  const WORD_FAMILY = { Carlito: 'Calibri', Caladea: 'Cambria', Cousine: 'Courier New', Tinos: 'Times New Roman', Arimo: 'Arial' };
+  return items.map((it) => {
+    try {
+      const win = locateItem(shows, it);
+      const s0 = win && win[0];
+      if (!s0 || !s0.fi) return null;
+      const st = matchFont(s0.fi);
+      const sys = st.candidates.find((c) => c.kind === 'system');
+      const bundled = st.candidates.find((c) => c.kind === 'bundled');
+      return { size: s0.size, color: fillToCss(s0.dfill), bold: st.bold, italic: st.italic, family: sys ? sys.family : WORD_FAMILY[bundled ? bundled.family : 'Arimo'] || 'Arial', fontBase: s0.fi.base, upright: win.every((s) => s.upright) };
+    } catch { return null; }
+  });
 }
 
 /** Aplica varias ediciones a un PDF (de derecha a izquierda para que el desplazamiento de una no afecte a la siguiente). */

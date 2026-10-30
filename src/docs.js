@@ -210,6 +210,16 @@ export class PdfDoc {
     return r;
   }
 
+  /** Fuente, tamaño y color reales de cada texto de una página (para las conversiones fieles); null en los que no se pueden leer. */
+  async textStyles(pageIndex, items) {
+    try {
+      let fonts = await this.prewarmText(pageIndex);
+      if (!fonts) fonts = await this.prewarmText(pageIndex);
+      if (!fonts) return items.map(() => null);
+      return TE.itemStyles(this._pl, pageIndex, items, { widthOf: widthFn(await fonts) });
+    } catch { return items.map(() => null); }
+  }
+
   /** Alternativa cuando el texto no se puede reescribir: se tapa el original y se escribe encima con una fuente equivalente. */
   fallbackOverlays(o) {
     return [

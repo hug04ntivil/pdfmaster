@@ -764,15 +764,21 @@ async function singleFileConvert(title, iconName, ext, filterName, extra, build,
     const data = await build(d, idx, (f) => b.progress(f));
     b.text('Guardando…');
     const p = await saveAs(name, data, [{ name: filterName, extensions: [ext] }]);
-    if (p) { doneToast(`Guardado: ${p.split(/[\\/]/).pop()}`, p); }
+    if (p) { doneToast(`Guardado: ${p.split(/[\\/]/).pop()}${data.note ? ' · ' + data.note : ''}`, p); }
   });
 }
 TOOLS.toword = () => {
-  const mode = field({ type: 'select', label: 'Tipo de conversión', options: [['text', 'Texto editable (recomendado)'], ['image', 'Fiel al original (cada página como imagen)']], value: 'text' });
+  const mode = field({ type: 'select', label: 'Tipo de conversión', options: [['faithful', 'Fiel al original (mismo diseño, el texto se puede editar)'], ['text', 'Texto editable en párrafos (se reacomoda)'], ['image', 'Fiel como imagen (no se puede editar)']], value: 'faithful', hint: 'Fiel al original deja cada línea de texto en su posición exacta, con su fuente, tamaño y color. Las fotos y dibujos quedan como fondo (no se retocan).' });
   return singleFileConvert('PDF a Word', 'fileText', 'docx', 'Documento de Word', [mode], (d, idx, p) => C.toDocx(d, idx, { mode: mode.get() }, p));
 };
-TOOLS.toexcel = () => singleFileConvert('PDF a Excel', 'sheet', 'xlsx', 'Libro de Excel', [h('div', { el: null })].filter(() => false), (d, idx, p) => C.toXlsx(d, idx, p));
-TOOLS.topptx = () => singleFileConvert('PDF a PowerPoint', 'slides', 'pptx', 'Presentación de PowerPoint', [], (d, idx, p) => C.toPptx(d, idx, p));
+TOOLS.toexcel = () => {
+  const mode = field({ type: 'select', label: 'Tipo de conversión', options: [['faithful', 'Fiel al original (mismo orden, anchos, alturas, fuentes y colores)'], ['data', 'Solo datos (celdas simples)']], value: 'faithful', hint: 'Fiel al original reproduce la página en celdas: el texto queda editable con su fuente, tamaño y color, y las columnas y filas con las medidas del documento.' });
+  return singleFileConvert('PDF a Excel', 'sheet', 'xlsx', 'Libro de Excel', [mode], (d, idx, p) => C.toXlsx(d, idx, { mode: mode.get() }, p));
+};
+TOOLS.topptx = () => {
+  const mode = field({ type: 'select', label: 'Tipo de conversión', options: [['faithful', 'Fiel al original (mismo diseño, el texto se puede editar)'], ['image', 'Fiel como imagen (no se puede editar)']], value: 'faithful', hint: 'Fiel al original deja cada línea de texto en su posición exacta, con su fuente, tamaño y color. Las fotos y dibujos quedan como fondo (no se retocan).' });
+  return singleFileConvert('PDF a PowerPoint', 'slides', 'pptx', 'Presentación de PowerPoint', [mode], (d, idx, p) => C.toPptx(d, idx, { mode: mode.get() }, p));
+};
 TOOLS.totext = () => singleFileConvert('PDF a texto', 'fileType', 'txt', 'Texto', [], (d, idx, p) => C.toText(d, idx, p));
 TOOLS.tohtml = () => {
   const img = field({ type: 'check', label: 'Incluir una imagen de cada página', value: false });
