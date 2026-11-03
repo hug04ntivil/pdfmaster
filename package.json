@@ -33,7 +33,7 @@
     "@resvg/resvg-js": "^2.6.2",
     "@tesseract.js-data/eng": "^1.0.0",
     "@tesseract.js-data/spa": "^1.0.0",
-    "docx": "^9.14.0",
+    "docx": "^9.15.1",
     "electron": "^45.0.0",
     "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
