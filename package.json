@@ -38,7 +38,7 @@
     "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "exceljs": "^4.4.0",
-    "lucide": "^1.61.0",
+    "lucide": "^1.66.0",
     "pdfjs-dist": "^6.4.299",
     "png-to-ico": "^3.0.2",
     "pptxgenjs": "^4.0.1",
